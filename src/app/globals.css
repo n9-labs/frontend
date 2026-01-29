@@ -28,72 +28,42 @@ html {
   background: linear-gradient(to bottom, #111827, #1f2937);
 }
 
-.copilotKitHeader {
-  background: rgba(17, 24, 39, 0.95);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(75, 85, 99, 0.3);
-}
-
 .copilotKitMessages {
   background: transparent;
-  padding: 1.5rem;
 }
 
-.copilotKitUserMessage {
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  color: #f3f4f6;
-}
-
-.copilotKitAssistantMessage {
-  background: rgba(31, 41, 55, 0.6);
-  border: 1px solid rgba(75, 85, 99, 0.3);
-  color: #f3f4f6;
+.copilotKitHeader {
+  background: #1f2937;
+  border-bottom: 1px solid #374151;
 }
 
 .copilotKitInput {
-  background: rgba(31, 41, 55, 0.8);
-  border: 1px solid rgba(75, 85, 99, 0.5);
-  color: #f3f4f6;
-  backdrop-filter: blur(12px);
+  background: #1f2937 !important;
+  border-top: 1px solid #374151;
 }
 
-.copilotKitInput:focus {
-  border-color: rgba(99, 102, 241, 0.6);
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+.copilotKitInput textarea {
+  background: #1f2937 !important;
+  color: #e5e7eb !important;
+  border: none !important;
 }
 
-.copilotKitInput::placeholder {
-  color: rgba(156, 163, 175, 0.6);
+.copilotKitInput textarea::placeholder {
+  color: #6b7280 !important;
 }
 
-.copilotKitButton {
-  background: rgba(99, 102, 241, 0.8);
-  color: white;
+.copilotKitInput textarea:focus {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
-.copilotKitButton:hover {
-  background: rgba(99, 102, 241, 1);
+.copilotKitUserMessage {
+  background: #6366f1;
+  color: #ffffff;
 }
 
-/* Markdown content in messages */
-.copilotKitMarkdown {
-  color: #f3f4f6;
-}
-
-.copilotKitMarkdown code {
-  background: rgba(17, 24, 39, 0.6);
-  color: #a5b4fc;
-  border: 1px solid rgba(75, 85, 99, 0.3);
-}
-
-.copilotKitCodeBlock {
-  background: rgba(17, 24, 39, 0.8);
-  border: 1px solid rgba(75, 85, 99, 0.3);
-}
-
-.copilotKitWindow {
-  border: 1px solid rgba(75, 85, 99, 0.3);
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+.copilotKitAssistantMessage {
+  background: #374151;
+  color: #e5e7eb;
 }
