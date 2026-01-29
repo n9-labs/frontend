@@ -11,6 +11,10 @@ services:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-localdev123}
       # Allow connections from other containers (compose network)
       - NEO4J_server_default__listen__address=0.0.0.0
+      # Keep Neo4j memory footprint small for dev (Podman VM is often 2GiB by default)
+      - NEO4J_server_memory_heap_initial__size=256m
+      - NEO4J_server_memory_heap_max__size=256m
+      - NEO4J_server_memory_pagecache_size=256m
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -27,6 +31,9 @@ services:
     environment:
       # Helps file watching in bind mounts on some hosts
       - PYTHONUNBUFFERED=1
+      # LLM API key (loaded from .env file via compose substitution)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # Neo4j connection info (for when you switch off mock tools)
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USERNAME=neo4j
@@ -48,6 +55,8 @@ services:
     depends_on:
       - agent
     environment:
+      # Increase Node.js heap for webpack compilation (needs ~2GB for CopilotKit deps)
+      - NODE_OPTIONS=--max-old-space-size=2048
       # IMPORTANT: inside compose, "localhost" would be the ui container.
       - LANGGRAPH_DEPLOYMENT_URL=http://agent:8123
       # Helps file watching in bind mounts on macOS/Windows
