@@ -5,12 +5,17 @@ Integrates with Atlassian MCP server for real Jira/Confluence access
 """
 
 import os
+import asyncio
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from langchain.tools import tool
 from langchain.agents import create_agent
-from copilotkit import CopilotKitMiddleware, CopilotKitState
+from langchain.agents.middleware.types import AgentState as LangChainAgentState
+from langchain_core.messages import HumanMessage
+from copilotkit import CopilotKitMiddleware
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.sessions import Connection
+from typing_extensions import NotRequired
 
 
 class Person(BaseModel):
@@ -40,12 +45,46 @@ class Expert(BaseModel):
     linked_jiras: List[str]
 
 
-class AgentState(CopilotKitState):
-    query: str = ""
-    rag_results: List[Jira] = []
-    graph_results: List[Jira] = []
-    experts: List[Expert] = []
-    search_phase: str = "idle"
+class ExpertFinderState(LangChainAgentState):
+    """
+    LangGraph agent state *schema*.
+
+    `create_agent(..., state_schema=...)` uses this for typing and schema-merging
+    (it is not something you instantiate like a Pydantic model).
+    """
+
+    # Provided by CopilotKitMiddleware at runtime (and by `make_initial_state` for local runs)
+    copilotkit: NotRequired[dict]
+
+    query: NotRequired[str]
+    rag_results: NotRequired[List[Jira]]
+    graph_results: NotRequired[List[Jira]]
+    experts: NotRequired[List[Expert]]
+    search_phase: NotRequired[str]
+
+
+def make_initial_state(user_message: str) -> ExpertFinderState:
+    """
+    Canonical local initializer for this agent's runtime state dict.
+
+    When you run via CopilotKit, the `copilotkit` key is typically provided upstream.
+    For local runs/tests, we seed it with empty actions/context.
+    """
+
+    return {
+        "messages": [HumanMessage(content=user_message)],
+        "copilotkit": {
+            "actions": [],
+            "context": [],
+            "intercepted_tool_calls": None,
+            "original_ai_message_id": None,
+        },
+        "query": "",
+        "rag_results": [],
+        "graph_results": [],
+        "experts": [],
+        "search_phase": "idle",
+    }
 
 
 # Mock data for development - represents JIRAs from OpenShift AI
@@ -55,21 +94,25 @@ MOCK_JIRAS = {
         type="EPIC",
         summary="Experiment Tracking Dashboard",
         description="Build a comprehensive experiment tracking dashboard for MLflow integration",
-        assignee=Person(name="Sarah Chen", email="schen@redhat.com", slack_id="U123ABC"),
+        assignee=Person(
+            name="Sarah Chen", email="schen@redhat.com", slack_id="U123ABC"
+        ),
         reporter=Person(name="Rachel Kim", email="rkim@redhat.com", slack_id="U789XYZ"),
         components=["dashboard", "mlflow", "frontend"],
         team="ML/AI",
-        status="In Progress"
+        status="In Progress",
     ),
     "RHOAIENG-4102": Jira(
         id="RHOAIENG-4102",
         type="RFE",
         summary="MLflow experiment comparison feature",
         description="Allow users to compare multiple experiments side-by-side",
-        assignee=Person(name="James Morrison", email="jmorrison@redhat.com", slack_id="U456DEF"),
+        assignee=Person(
+            name="James Morrison", email="jmorrison@redhat.com", slack_id="U456DEF"
+        ),
         reporter=Person(name="Alice Patel", email="apatel@redhat.com"),
         components=["mlflow", "ui"],
-        status="Approved"
+        status="Approved",
     ),
     "RHOAIENG-3845": Jira(
         id="RHOAIENG-3845",
@@ -79,17 +122,19 @@ MOCK_JIRAS = {
         assignee=Person(name="David Kumar", email="dkumar@redhat.com"),
         components=["training", "pytorch", "kubeflow"],
         team="Platform",
-        status="In Progress"
+        status="In Progress",
     ),
     "RHOAIENG-4522": Jira(
         id="RHOAIENG-4522",
         type="STORY",
         summary="Implement experiment metrics visualization",
         description="Create interactive charts for experiment metrics tracking",
-        assignee=Person(name="Mike Johnson", email="mjohnson@redhat.com", slack_id="U234GHI"),
+        assignee=Person(
+            name="Mike Johnson", email="mjohnson@redhat.com", slack_id="U234GHI"
+        ),
         components=["frontend", "dashboard", "visualization"],
         team="Frontend",
-        status="In Review"
+        status="In Review",
     ),
     "RHOAIENG-4089": Jira(
         id="RHOAIENG-4089",
@@ -98,7 +143,7 @@ MOCK_JIRAS = {
         description="Define product strategy for experiment tracking features",
         assignee=Person(name="Rachel Kim", email="rkim@redhat.com", slack_id="U789XYZ"),
         components=["strategy", "mlflow"],
-        status="Closed"
+        status="Closed",
     ),
     "RHOAIENG-3901": Jira(
         id="RHOAIENG-3901",
@@ -108,7 +153,7 @@ MOCK_JIRAS = {
         assignee=Person(name="Lisa Zhang", email="lzhang@redhat.com"),
         components=["kubeflow", "training", "gpu"],
         team="Platform",
-        status="In Progress"
+        status="In Progress",
     ),
     "RHOAIENG-3846": Jira(
         id="RHOAIENG-3846",
@@ -119,7 +164,7 @@ MOCK_JIRAS = {
         reporter=Person(name="David Kumar", email="dkumar@redhat.com"),
         components=["kuberay", "scheduling"],
         team="Platform",
-        status="In Progress"
+        status="In Progress",
     ),
     "RHOAIENG-3847": Jira(
         id="RHOAIENG-3847",
@@ -129,17 +174,19 @@ MOCK_JIRAS = {
         assignee=Person(name="Alex Rodriguez", email="arodriguez@redhat.com"),
         components=["kuberay", "autoscaling"],
         team="Platform",
-        status="In Review"
+        status="In Review",
     ),
     "RHOAIENG-4103": Jira(
         id="RHOAIENG-4103",
         type="STORY",
         summary="Create experiment tagging and search system",
         description="Build tagging system for experiments with advanced search",
-        assignee=Person(name="Sarah Chen", email="schen@redhat.com", slack_id="U123ABC"),
+        assignee=Person(
+            name="Sarah Chen", email="schen@redhat.com", slack_id="U123ABC"
+        ),
         components=["mlflow", "search", "backend"],
         team="ML/AI",
-        status="In Progress"
+        status="In Progress",
     ),
 }
 
@@ -150,10 +197,10 @@ def search_jira_vectors(query: str) -> str:
     Perform semantic search on JIRA descriptions to find relevant issues.
     This simulates a vector database search (like Qdrant or Chroma) that would
     find JIRAs matching the query based on semantic similarity.
-    
+
     Args:
         query: The search query (e.g., "experiment tracking dashboard")
-        
+
     Returns:
         Summary of JIRA issues that match the query semantically
     """
@@ -161,20 +208,22 @@ def search_jira_vectors(query: str) -> str:
     # For now, simple keyword matching as mock
     query_lower = query.lower()
     results = []
-    
+
     for jira in MOCK_JIRAS.values():
         # Simple relevance scoring based on keywords
         summary_lower = jira.summary.lower()
         desc_lower = (jira.description or "").lower()
-        
-        if any(word in summary_lower or word in desc_lower for word in query_lower.split()):
+
+        if any(
+            word in summary_lower or word in desc_lower for word in query_lower.split()
+        ):
             results.append(jira)
-            
+
     # Return top 3-5 most relevant as formatted string
     top_results = results[:5]
     if not top_results:
         return "No matching JIRAs found"
-    
+
     output = f"Found {len(top_results)} relevant JIRAs:\n\n"
     for jira in top_results:
         output += f"**{jira.id}** ({jira.type}): {jira.summary}\n"
@@ -187,48 +236,48 @@ def search_jira_vectors(query: str) -> str:
         if jira.components:
             output += f"  Components: {', '.join(jira.components)}\n"
         output += f"  Status: {jira.status}\n\n"
-    
+
     return output
 
 
-@tool  
+@tool
 def traverse_jira_graph(jira_ids: List[str], max_depth: int = 2) -> str:
     """
     Traverse the JIRA relationship graph starting from the given JIRAs.
     Follows connections like: relates_to, depends_on, blocks, child_of, linked_issue.
     This simulates a graph database traversal (like Neo4j) that would walk through
     connected JIRAs to build a comprehensive picture.
-    
+
     Args:
         jira_ids: List of JIRA IDs to start traversal from
         max_depth: Maximum depth to traverse (default 2)
-        
+
     Returns:
         Summary of connected JIRAs
     """
     # TODO: Replace with actual graph DB traversal (Neo4j, etc.)
     # For now, return related JIRAs based on component overlap
-    
+
     results = []
     components_seen = set()
-    
+
     # Add starting JIRAs
     for jira_id in jira_ids:
         if jira_id in MOCK_JIRAS:
             jira = MOCK_JIRAS[jira_id]
             results.append(jira)
             components_seen.update(jira.components)
-    
+
     # Find related JIRAs by component overlap
     for jira in MOCK_JIRAS.values():
         if jira.id not in jira_ids:
             # Check if shares components
             if any(comp in components_seen for comp in jira.components):
                 results.append(jira)
-    
+
     if not results:
         return "No connected JIRAs found"
-    
+
     output = f"Graph traversal found {len(results)} connected JIRAs:\n\n"
     for jira in results:
         output += f"**{jira.id}** ({jira.type}): {jira.summary}\n"
@@ -247,7 +296,7 @@ def traverse_jira_graph(jira_ids: List[str], max_depth: int = 2) -> str:
         if jira.components:
             output += f"  Components: {', '.join(jira.components)}\n"
         output += f"  Status: {jira.status}\n\n"
-    
+
     return output
 
 
@@ -340,7 +389,7 @@ explain why the evidence is ambiguous."""
 # Uses environment variables for authentication
 # Supports both Cloud (username + API token) and Server/Data Center (Personal Access Token)
 # Note: langchain-mcp-adapters v0.1.0+ requires "transport" key in config
-MCP_SERVERS = {
+MCP_SERVERS: dict[str, Connection] = {
     "atlassian": {
         "transport": "stdio",  # Required for v0.1.0+
         "command": "uvx",
@@ -348,14 +397,11 @@ MCP_SERVERS = {
         "env": {
             # Jira URL (required)
             "JIRA_URL": os.getenv("JIRA_URL", ""),
-            
             # For Jira Cloud: use USERNAME + API_TOKEN
             "JIRA_USERNAME": os.getenv("JIRA_USERNAME", ""),
             "JIRA_API_TOKEN": os.getenv("JIRA_API_TOKEN", ""),
-            
             # For Jira Server/Data Center (on-prem): use PERSONAL_TOKEN instead
             "JIRA_PERSONAL_TOKEN": os.getenv("JIRA_PERSONAL_TOKEN", ""),
-            
             # Confluence (optional)
             "CONFLUENCE_URL": os.getenv("CONFLUENCE_URL", ""),
             "CONFLUENCE_USERNAME": os.getenv("CONFLUENCE_USERNAME", ""),
@@ -369,43 +415,40 @@ MCP_SERVERS = {
 async def load_tools():
     """
     Load all tools including MCP tools if configured.
-    MultiServerMCPClient is stateless by default - each tool invocation 
+    MultiServerMCPClient is stateless by default - each tool invocation
     creates a fresh session (per https://docs.langchain.com/oss/python/langchain/mcp)
     """
     # Start with local mock tools
     # tools = [search_jira_vectors, traverse_jira_graph]
     tools = []
-    
+
     # Check if Atlassian MCP is configured
     jira_configured = os.getenv("JIRA_URL") and (
-        os.getenv("JIRA_PERSONAL_TOKEN") or
-        (os.getenv("JIRA_USERNAME") and os.getenv("JIRA_API_TOKEN"))
+        os.getenv("JIRA_PERSONAL_TOKEN")
+        or (os.getenv("JIRA_USERNAME") and os.getenv("JIRA_API_TOKEN"))
     )
-    
+
     if not jira_configured:
         print("⚠️  Atlassian MCP not configured - using mock tools only")
         return tools
-    
+
     try:
         client = MultiServerMCPClient(MCP_SERVERS)
         mcp_tools = await client.get_tools()
         print(f"✅ Loaded {len(mcp_tools)} MCP tools from Atlassian")
-        
+
         # Log tool names to verify descriptions are loaded
-        tool_names = [getattr(tool, 'name', 'unknown') for tool in mcp_tools]
+        tool_names = [getattr(tool, "name", "unknown") for tool in mcp_tools]
         print(f"   Available MCP tools: {', '.join(tool_names[:10])}")
         if len(tool_names) > 10:
             print(f"   ... and {len(tool_names) - 10} more")
-        
+
         tools.extend(mcp_tools)
     except Exception as e:
         print(f"⚠️  Failed to load MCP tools: {e}")
-    
+
     return tools
 
-
-# Load tools at module level for LangGraph deployment
-import asyncio
 
 all_tools = asyncio.run(load_tools())
 
@@ -413,8 +456,8 @@ agent = create_agent(
     model="claude-sonnet-4-5",
     tools=all_tools,
     middleware=[CopilotKitMiddleware()],
-    state_schema=AgentState,
-    system_prompt=SYSTEM_PROMPT
+    state_schema=ExpertFinderState,
+    system_prompt=SYSTEM_PROMPT,
 )
 
 graph = agent
