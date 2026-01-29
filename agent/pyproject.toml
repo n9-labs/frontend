@@ -13,8 +13,12 @@ dependencies = [
     "python-dotenv>=1.0.0,<2.0.0",
     "langgraph-cli[inmem]>=0.4.11",
     "langchain-anthropic>=0.3.0",
+    "langchain-openai>=0.3.0",
     "copilotkit>=0.1.74",
     "langgraph-api>=0.6.0",
     "langchain-mcp-adapters>=0.1.0,<0.2.0",
     "mcp>=1.0.0",
+    # Neo4j integration
+    "neo4j>=5.0.0",
+    "langchain-neo4j>=0.1.0",
 ]

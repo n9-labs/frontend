@@ -4,7 +4,6 @@ Uses RAG search and graph traversal to identify experts from JIRA data
 Integrates with Atlassian MCP server for real Jira/Confluence access
 """
 
-import os
 import asyncio
 from typing import List, Optional
 from pydantic import BaseModel, Field, model_validator
@@ -33,6 +32,14 @@ class Settings(BaseSettings):
 
     # Agent/model
     model: str = Field(default="claude-sonnet-4-5", validation_alias="N9_AGENT_MODEL")
+
+    # Neo4j connection (for graph database)
+    # If username/password are empty, connects without auth (for local dev)
+    neo4j_uri: str = Field(
+        default="bolt://localhost:7687", validation_alias="NEO4J_URI"
+    )
+    neo4j_username: str = Field(default="", validation_alias="NEO4J_USERNAME")
+    neo4j_password: str = Field(default="", validation_alias="NEO4J_PASSWORD")
 
     # Atlassian MCP (Jira required; Confluence optional)
     jira_url: str = Field(default="", validation_alias="JIRA_URL")
@@ -69,6 +76,33 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+# Neo4j driver (lazy initialization)
+_neo4j_driver = None
+
+
+def get_neo4j_driver():
+    """Get or create Neo4j driver connection."""
+    global _neo4j_driver
+    if _neo4j_driver is None:
+        try:
+            from neo4j import GraphDatabase  # type: ignore[import-untyped]
+
+            # Handle auth - if username/password are empty, use no auth
+            auth = None
+            if settings.neo4j_username and settings.neo4j_password:
+                auth = (settings.neo4j_username, settings.neo4j_password)
+
+            _neo4j_driver = GraphDatabase.driver(settings.neo4j_uri, auth=auth)
+            # Verify connectivity
+            _neo4j_driver.verify_connectivity()
+            auth_status = "with auth" if auth else "without auth"
+            print(f"[OK] Connected to Neo4j at {settings.neo4j_uri} ({auth_status})")
+        except Exception as e:
+            print(f"[WARN] Failed to connect to Neo4j: {e}")
+            return None
+    return _neo4j_driver
 
 
 class Person(BaseModel):
@@ -245,11 +279,323 @@ MOCK_JIRAS = {
 
 
 @tool
+def search_jira_text(query: str, limit: int = 10) -> str:
+    """
+    Search for JIRAs in Neo4j using text matching on title and text fields.
+    Use this for keyword-based searches.
+
+    Args:
+        query: The search query (e.g., "observability dashboard", "llm-d")
+        limit: Maximum number of results to return (default 10)
+
+    Returns:
+        Summary of JIRA issues that match the query
+    """
+    driver = get_neo4j_driver()
+    if driver is None:
+        return "Error: Unable to connect to Neo4j database"
+
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (j:JiraDocument)
+                WHERE toLower(j.title) CONTAINS toLower($query)
+                   OR toLower(j.text) CONTAINS toLower($query)
+                RETURN DISTINCT j.key as key, j.title as title, j.issue_type as issue_type,
+                       j.status as status, j.assignee as assignee, j.reporter as reporter,
+                       j.project as project, j.labels as labels, j.priority as priority,
+                       j.url as url, j.updated_at as updated_at
+                ORDER BY updated_at DESC
+                LIMIT $limit
+                """,
+                query=query,
+                limit=limit,
+            )
+
+            records = list(result)
+            if not records:
+                return f"No JIRAs found matching '{query}'"
+
+            output = f"Found {len(records)} JIRAs matching '{query}':\n\n"
+            for record in records:
+                output += (
+                    f"**{record['key']}** ({record['issue_type']}): {record['title']}\n"
+                )
+                if record["assignee"]:
+                    output += f"  Assignee: {record['assignee']}\n"
+                if record["reporter"]:
+                    output += f"  Reporter: {record['reporter']}\n"
+                output += f"  Project: {record['project']}\n"
+                if record["labels"]:
+                    output += f"  Labels: {', '.join(record['labels'])}\n"
+                output += (
+                    f"  Status: {record['status']} | Priority: {record['priority']}\n"
+                )
+                if record["url"]:
+                    output += f"  URL: {record['url']}\n"
+                output += "\n"
+
+            return output
+
+    except Exception as e:
+        return f"Error searching Neo4j: {e}"
+
+
+@tool
+def search_jira_semantic(query: str, limit: int = 10) -> str:
+    """
+    Search for JIRAs using semantic/vector similarity search.
+    This finds JIRAs that are conceptually similar to your query, even if they
+    don't contain the exact keywords. Requires generating an embedding for the query.
+
+    Note: This tool requires the query to be embedded first. For now, use search_jira_text
+    for keyword-based searches.
+
+    Args:
+        query: The semantic search query (e.g., "how to monitor AI model performance")
+        limit: Maximum number of results to return (default 10)
+
+    Returns:
+        Summary of semantically similar JIRA issues
+    """
+    driver = get_neo4j_driver()
+    if driver is None:
+        return "Error: Unable to connect to Neo4j database"
+
+    # TODO: Integrate with embedding model (OpenAI, etc.) to generate query embedding
+    # For now, fall back to text search
+    return search_jira_text.invoke({"query": query, "limit": limit})
+
+
+@tool
+def get_jira_details(jira_key: str) -> str:
+    """
+    Get full details of a specific JIRA by its key.
+
+    Args:
+        jira_key: The JIRA key (e.g., "RHAIRFE-1237")
+
+    Returns:
+        Full details of the JIRA including description
+    """
+    driver = get_neo4j_driver()
+    if driver is None:
+        return "Error: Unable to connect to Neo4j database"
+
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (j:JiraDocument)
+                WHERE j.key = $jira_key
+                RETURN j.key as key, j.title as title, j.text as text,
+                       j.issue_type as issue_type, j.status as status,
+                       j.assignee as assignee, j.reporter as reporter,
+                       j.project as project, j.labels as labels,
+                       j.priority as priority, j.url as url,
+                       j.created_at as created_at, j.updated_at as updated_at
+                """,
+                jira_key=jira_key,
+            )
+
+            record = result.single()
+            if not record:
+                return f"No JIRA found with key: {jira_key}"
+
+            output = f"**{record['key']}** ({record['issue_type']})\n"
+            output += f"# {record['title']}\n\n"
+            output += (
+                f"**Status:** {record['status']} | **Priority:** {record['priority']}\n"
+            )
+            output += f"**Project:** {record['project']}\n"
+            if record["assignee"]:
+                output += f"**Assignee:** {record['assignee']}\n"
+            if record["reporter"]:
+                output += f"**Reporter:** {record['reporter']}\n"
+            if record["labels"]:
+                output += f"**Labels:** {', '.join(record['labels'])}\n"
+            if record["url"]:
+                output += f"**URL:** {record['url']}\n"
+            output += f"**Created:** {record['created_at']} | **Updated:** {record['updated_at']}\n\n"
+            output += "---\n\n"
+            # Extract just the description part from text
+            text = record["text"] or ""
+            if "description:" in text:
+                desc_start = text.find("description:") + len("description:")
+                desc_end = text.find("date_created:")
+                if desc_end > desc_start:
+                    output += text[desc_start:desc_end].strip()
+                else:
+                    output += text[desc_start:].strip()
+            else:
+                output += text[:2000]  # Limit output size
+
+            return output
+
+    except Exception as e:
+        return f"Error getting JIRA details: {e}"
+
+
+@tool
+def find_experts_by_topic(topic: str, limit: int = 10) -> str:
+    """
+    Find people who are experts on a topic by analyzing JIRA assignments.
+    Returns people ranked by how many related JIRAs they've worked on.
+
+    Args:
+        topic: The topic to find experts for (e.g., "observability", "llm-d", "vLLM")
+        limit: Maximum number of experts to return (default 10)
+
+    Returns:
+        List of experts with their involvement details
+    """
+    driver = get_neo4j_driver()
+    if driver is None:
+        return "Error: Unable to connect to Neo4j database"
+
+    try:
+        with driver.session() as session:
+            # Find JIRAs matching the topic and aggregate by assignee
+            result = session.run(
+                """
+                MATCH (j:JiraDocument)
+                WHERE toLower(j.title) CONTAINS toLower($topic)
+                   OR toLower(j.text) CONTAINS toLower($topic)
+                WITH j
+                WHERE j.assignee IS NOT NULL AND j.assignee <> ''
+                WITH j.assignee as person,
+                     count(DISTINCT j) as jira_count,
+                     collect(DISTINCT j.key)[0..5] as sample_jiras,
+                     collect(DISTINCT j.issue_type) as issue_types,
+                     collect(DISTINCT j.project)[0..3] as projects
+                ORDER BY jira_count DESC
+                LIMIT $limit
+                RETURN person, jira_count, sample_jiras, issue_types, projects
+                """,
+                topic=topic,
+                limit=limit,
+            )
+
+            records = list(result)
+            if not records:
+                return f"No experts found for topic: '{topic}'"
+
+            output = f"Found {len(records)} experts for topic '{topic}':\n\n"
+            for record in records:
+                output += f"**{record['person']}**\n"
+                output += f"  JIRAs on this topic: {record['jira_count']}\n"
+                output += f"  Issue types: {', '.join(record['issue_types'])}\n"
+                output += f"  Projects: {', '.join(record['projects'])}\n"
+                output += f"  Sample JIRAs: {', '.join(record['sample_jiras'])}\n\n"
+
+            return output
+
+    except Exception as e:
+        return f"Error finding experts: {e}"
+
+
+@tool
+def find_experts_by_label(labels: List[str], limit: int = 10) -> str:
+    """
+    Find people who are experts based on JIRA labels.
+    Returns people ranked by how many JIRAs with those labels they've worked on.
+
+    Args:
+        labels: List of labels to search for (e.g., ["MaaS", "llm-d"])
+        limit: Maximum number of experts to return (default 10)
+
+    Returns:
+        List of experts with their involvement details
+    """
+    driver = get_neo4j_driver()
+    if driver is None:
+        return "Error: Unable to connect to Neo4j database"
+
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (j:JiraDocument)
+                WHERE any(label IN j.labels WHERE label IN $labels)
+                WITH j
+                WHERE j.assignee IS NOT NULL AND j.assignee <> ''
+                WITH j.assignee as person,
+                     count(DISTINCT j) as jira_count,
+                     collect(DISTINCT j.key)[0..5] as sample_jiras,
+                     collect(DISTINCT j.issue_type) as issue_types,
+                     [label IN collect(j.labels) WHERE label IN $labels] as matched_labels
+                ORDER BY jira_count DESC
+                LIMIT $limit
+                RETURN person, jira_count, sample_jiras, issue_types
+                """,
+                labels=labels,
+                limit=limit,
+            )
+
+            records = list(result)
+            if not records:
+                return f"No experts found for labels: {labels}"
+
+            output = f"Found {len(records)} experts for labels {labels}:\n\n"
+            for record in records:
+                output += f"**{record['person']}**\n"
+                output += f"  JIRAs with these labels: {record['jira_count']}\n"
+                output += f"  Issue types: {', '.join(record['issue_types'])}\n"
+                output += f"  Sample JIRAs: {', '.join(record['sample_jiras'])}\n\n"
+
+            return output
+
+    except Exception as e:
+        return f"Error finding experts: {e}"
+
+
+@tool
+def list_jira_labels() -> str:
+    """
+    List all unique labels used in JIRAs with their counts.
+    Useful to understand what labels/categories exist in the data.
+
+    Returns:
+        List of labels with counts
+    """
+    driver = get_neo4j_driver()
+    if driver is None:
+        return "Error: Unable to connect to Neo4j database"
+
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (j:JiraDocument)
+                UNWIND j.labels as label
+                WITH label, count(*) as count
+                ORDER BY count DESC
+                LIMIT 50
+                RETURN label, count
+                """
+            )
+
+            records = list(result)
+            if not records:
+                return "No labels found in the database"
+
+            output = "JIRA Labels (top 50):\n\n"
+            for record in records:
+                output += f"- **{record['label']}**: {record['count']} JIRAs\n"
+
+            return output
+
+    except Exception as e:
+        return f"Error listing labels: {e}"
+
+
+# Keep mock tools as fallback when Neo4j is not available
+@tool
 def search_jira_vectors(query: str) -> str:
     """
-    Perform semantic search on JIRA descriptions to find relevant issues.
-    This simulates a vector database search (like Qdrant or Chroma) that would
-    find JIRAs matching the query based on semantic similarity.
+    [MOCK/FALLBACK] Perform semantic search on JIRA descriptions to find relevant issues.
+    This uses mock data when Neo4j is not available.
 
     Args:
         query: The search query (e.g., "experiment tracking dashboard")
@@ -257,13 +603,10 @@ def search_jira_vectors(query: str) -> str:
     Returns:
         Summary of JIRA issues that match the query semantically
     """
-    # TODO: Replace with actual vector DB call (Qdrant, Chroma, etc.)
-    # For now, simple keyword matching as mock
     query_lower = query.lower()
     results = []
 
     for jira in MOCK_JIRAS.values():
-        # Simple relevance scoring based on keywords
         summary_lower = jira.summary.lower()
         desc_lower = (jira.description or "").lower()
 
@@ -272,12 +615,11 @@ def search_jira_vectors(query: str) -> str:
         ):
             results.append(jira)
 
-    # Return top 3-5 most relevant as formatted string
     top_results = results[:5]
     if not top_results:
-        return "No matching JIRAs found"
+        return "No matching JIRAs found (using mock data)"
 
-    output = f"Found {len(top_results)} relevant JIRAs:\n\n"
+    output = f"Found {len(top_results)} relevant JIRAs (mock data):\n\n"
     for jira in top_results:
         output += f"**{jira.id}** ({jira.type}): {jira.summary}\n"
         if jira.assignee:
@@ -293,149 +635,99 @@ def search_jira_vectors(query: str) -> str:
     return output
 
 
-@tool
-def traverse_jira_graph(jira_ids: List[str], max_depth: int = 2) -> str:
-    """
-    Traverse the JIRA relationship graph starting from the given JIRAs.
-    Follows connections like: relates_to, depends_on, blocks, child_of, linked_issue.
-    This simulates a graph database traversal (like Neo4j) that would walk through
-    connected JIRAs to build a comprehensive picture.
-
-    Args:
-        jira_ids: List of JIRA IDs to start traversal from
-        max_depth: Maximum depth to traverse (default 2)
-
-    Returns:
-        Summary of connected JIRAs
-    """
-    # TODO: Replace with actual graph DB traversal (Neo4j, etc.)
-    # For now, return related JIRAs based on component overlap
-
-    results = []
-    components_seen = set()
-
-    # Add starting JIRAs
-    for jira_id in jira_ids:
-        if jira_id in MOCK_JIRAS:
-            jira = MOCK_JIRAS[jira_id]
-            results.append(jira)
-            components_seen.update(jira.components)
-
-    # Find related JIRAs by component overlap
-    for jira in MOCK_JIRAS.values():
-        if jira.id not in jira_ids:
-            # Check if shares components
-            if any(comp in components_seen for comp in jira.components):
-                results.append(jira)
-
-    if not results:
-        return "No connected JIRAs found"
-
-    output = f"Graph traversal found {len(results)} connected JIRAs:\n\n"
-    for jira in results:
-        output += f"**{jira.id}** ({jira.type}): {jira.summary}\n"
-        if jira.assignee:
-            output += f"  Assignee: {jira.assignee.name} ({jira.assignee.email})"
-            if jira.assignee.slack_id:
-                output += f" (Slack: {jira.assignee.slack_id})"
-            output += "\n"
-        if jira.reporter:
-            output += f"  Reporter: {jira.reporter.name} ({jira.reporter.email})"
-            if jira.reporter.slack_id:
-                output += f" (Slack: {jira.reporter.slack_id})"
-            output += "\n"
-        if jira.team:
-            output += f"  Team: {jira.team}\n"
-        if jira.components:
-            output += f"  Components: {', '.join(jira.components)}\n"
-        output += f"  Status: {jira.status}\n\n"
-
-    return output
-
-
 # System prompt with role inference guidelines
-SYSTEM_PROMPT = """You are an expert finder for OpenShift AI. Your job is to help users 
+SYSTEM_PROMPT = """You are an expert finder for Red Hat AI. Your job is to help users 
 find the right people to talk to about features, products, or technical questions.
-
-⚠️ **IMPORTANT**: Always READ the tool descriptions carefully before using them! 
-The MCP tools include detailed examples and parameter explanations - follow them exactly.
 
 ## Available Tools
 
-You have access to two types of tools:
+### Neo4j JIRA Search Tools
+The database contains JIRAs from Red Hat AI projects with these properties:
+- key: JIRA ID (e.g., "RHAIRFE-1237", "RHAISTRAT-1077")
+- title: Issue summary
+- text: Full content with description
+- issue_type: Feature Request, Story, Feature, Task, Epic, Sub-task, Outcome, Initiative, Bug
+- status: Issue status (New, Approved, Closed, etc.)
+- assignee: Person assigned (name string, may be empty)
+- reporter: Person who reported (name string)
+- project: Project name (e.g., "Red Hat AI RFE project", "Red Hat AI Strategy Project")
+- labels: Array of labels (e.g., ["MaaS", "llm-d", "3.4-candidate"])
+- priority: Priority level (Critical, Major, Undefined, etc.)
 
-### Local Mock Tools (always available)
-- search_jira_vectors: Semantic search on mock JIRA data
-- traverse_jira_graph: Graph traversal on mock JIRA relationships
-
-### Atlassian MCP Tools (when configured)
-**IMPORTANT**: The MCP tools come with detailed descriptions and examples. READ them carefully!
-
-
+**Tools:**
+- **search_jira_text(query, limit)**: Keyword search on JIRA titles and content
+- **find_experts_by_topic(topic, limit)**: Find people ranked by JIRAs on a topic
+- **find_experts_by_label(labels, limit)**: Find people by JIRA labels
+- **get_jira_details(jira_key)**: Get full details of a specific JIRA
+- **list_jira_labels()**: See all available labels in the database
 
 ## Your Workflow
 
-1. **Understand the Query**: When a user asks "Who do I talk to about [feature/topic]?", 
-   extract the key concepts from their question.
+1. **Understand the Query**: When a user asks "Who should I talk to about [topic]?", 
+   extract the key concepts (e.g., "llm-d", "observability", "autoscaling").
 
-2. **Search Jira**: 
-   - **READ the tool description first!** The jira_search tool has examples you should follow
-   - Start simple: Try `search(project="RHOAIENG", text="<keywords>")`  
-   - If that fails: Fall back to `search_jira_vectors("<keywords>")` (always works)
-   - Only use complex JQL if you've READ the tool's examples and are following them exactly
+2. **Find Experts Directly**: Use `find_experts_by_topic` with relevant keywords.
+   This returns people ranked by how many related JIRAs they've worked on.
+   
+   Example: find_experts_by_topic("llm-d") -> Returns top contributors to llm-d work
 
-3. **Expand via Graph Traversal**: Take the JIRA IDs from step 2 and use 
-   traverse_jira_graph to find connected issues. This gives you a comprehensive view 
-   of everyone working in that feature area.
+3. **Use Labels for Specific Areas**: If you know the label, use `find_experts_by_label`.
+   Common labels include: "MaaS", "llm-d", "3.4-candidate", "tech-reviewed"
+   
+   Example: find_experts_by_label(["MaaS"]) -> Returns experts in MaaS area
 
-4. **Identify Experts**: Analyze all the JIRAs to identify the key people involved.
-   For each person, determine their likely role and team.
+4. **Search for Context**: Use `search_jira_text` to find relevant JIRAs and understand
+   what work is being done. Then use `get_jira_details` for full descriptions.
+
+5. **Synthesize Results**: Combine findings to recommend the best contacts.
 
 ## Role Inference Guidelines
 
-Use these heuristics to infer roles from JIRA types and metadata:
+Use issue types and context to infer roles:
 
-- **Epic JIRAs**: Usually have a **Feature Lead** or **Product Manager** assigned
-  - Epics represent large features that need technical leadership
-  - Product strategy is often tracked in Epics
-  - If someone is assigned to multiple Epics, they're likely a PM or Tech Lead
+- **Feature Request / Feature**: Often owned by **Product Managers** or **Tech Leads**
+  - These define what should be built
+  - The assignee is likely the feature owner or PM
   
-- **Story JIRAs**: Usually assigned to **Developers**
-  - Implementation work is done by developers
-  - Stories are the main unit of development work
-  
-- **Bug JIRAs**: Usually assigned to **Developers** (the one fixing it)
-  - The **Reporter** might be a QE engineer or Product Manager
-  
-- **Task JIRAs**: Could be assigned to various roles (Dev, QE, PM, etc.)
-  - Context matters - look at the description and related issues
-  
-- **Multiple related issues in the same area**: Likely indicates subject matter expertise
-  - Someone working on many dashboard-related tickets is the dashboard expert
+- **Outcome / Initiative**: Usually owned by **Strategy** or **Leadership**
+  - High-level goals and directions
+  - Assignees are typically senior leaders or PMs
 
-## Team Inference
+- **Story / Task / Sub-task**: Usually assigned to **Developers** or **Engineers**
+  - Implementation work
+  - The assignee is doing the hands-on work
 
-Use component tags and JIRA metadata to guess team affiliations
+- **Epic**: Owned by **Feature Leads** or **Engineering Managers**
+  - Coordinates multiple stories/tasks
+  
+- **Bug**: Assigned to **Developers** for fixing
+  - Reporter may be QE or customer-facing team
 
 ## Confidence Levels
 
-Assign confidence based on clarity of evidence:
-
-- **High**: Clear JIRA type match (e.g., RFE assigned to PM), multiple related JIRAs
-- **Medium**: Reasonable inference but limited context
-- **Low**: Unclear or conflicting signals
+- **High**: Person has 5+ JIRAs on the topic, clear ownership pattern
+- **Medium**: Person has 2-4 JIRAs, some ownership signals
+- **Low**: Only 1 JIRA or unclear context
 
 ## Output Format
 
-For each expert you identify, provide:
-- Their name and contact info
-- Inferred role with confidence level
-- Team (if identifiable)
-- Clear reasoning explaining your inference
-- List of JIRA IDs supporting your conclusion
+For each expert, format as follows with a BLANK LINE between each person:
 
-Always be helpful and explain your reasoning clearly. If you're unsure, say so and 
-explain why the evidence is ambiguous."""
+**[Name]**
+- Role Inference: [role] ([confidence] Confidence)
+- JIRAs: [count]
+- Projects: [project names]
+- Sample JIRA Keys: [keys]
+- Reasoning: [brief explanation]
+
+[blank line before next person]
+
+**[Next Name]**
+...
+
+IMPORTANT: Always include a blank line between each expert entry for readability.
+
+Be concise but informative. If multiple people are relevant, rank them by expertise level."""
 
 
 # MCP server configuration for Atlassian tools
@@ -467,13 +759,37 @@ MCP_SERVERS: dict[str, Connection] = {
 
 async def load_tools():
     """
-    Load all tools including MCP tools if configured.
+    Load all tools including MCP tools and Neo4j tools if configured.
     MultiServerMCPClient is stateless by default - each tool invocation
     creates a fresh session (per https://docs.langchain.com/oss/python/langchain/mcp)
     """
-    # Start with local mock tools
-    # tools = [search_jira_vectors, traverse_jira_graph]
     tools = []
+
+    # Check if Neo4j is configured and available
+    neo4j_driver = get_neo4j_driver()
+    if neo4j_driver is not None:
+        # Use real Neo4j tools for JiraDocument schema
+        tools.extend(
+            [
+                search_jira_text,
+                search_jira_semantic,
+                get_jira_details,
+                find_experts_by_topic,
+                find_experts_by_label,
+                list_jira_labels,
+            ]
+        )
+        print("[OK] Neo4j tools loaded:")
+        print("   - search_jira_text: Keyword search on JIRAs")
+        print("   - search_jira_semantic: Semantic/vector search")
+        print("   - get_jira_details: Get full JIRA details")
+        print("   - find_experts_by_topic: Find experts by topic keywords")
+        print("   - find_experts_by_label: Find experts by JIRA labels")
+        print("   - list_jira_labels: List all available labels")
+    else:
+        # Fall back to mock tools
+        tools.extend([search_jira_vectors])
+        print("[WARN] Neo4j not available - using mock tools")
 
     # Check if Atlassian MCP is configured
     jira_configured = bool(settings.jira_url) and bool(
@@ -482,7 +798,7 @@ async def load_tools():
     )
 
     if not jira_configured:
-        print("⚠️  Atlassian MCP not configured - using mock tools only")
+        print("[WARN] Atlassian MCP not configured - skipping MCP tools")
         return tools
 
     try:
@@ -498,7 +814,7 @@ async def load_tools():
 
         tools.extend(mcp_tools)
     except Exception as e:
-        print(f"⚠️  Failed to load MCP tools: {e}")
+        print(f"[WARN] Failed to load MCP tools: {e}")
 
     return tools
 
