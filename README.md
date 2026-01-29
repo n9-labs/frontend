@@ -37,13 +37,14 @@ bun install
 
 2. Set up your environment variables:
 ```bash
-cp .env.example .env
-# Edit .env and add your API key
+touch .env
 ```
 
 Your `.env` file should contain:
 ```
 OPENAI_API_KEY=your-openai-api-key-here
+ANTHROPIC_API_KEY=your-anthropic-api-key-here
+MODEL=model-for-your-agent
 ```
 
 3. Start the development server:
@@ -74,14 +75,15 @@ The following scripts can also be run using your preferred package manager:
 - `lint` - Runs ESLint for code linting
 - `install:agent` - Installs Python dependencies for the agent
 
-## Docker Compose (Containerized Development)
+## Quick Start with Docker Compose
 
-For containerized development with hot-reloading, you can use Docker Compose (or Podman Compose).
+The fastest way to get running is with Docker Compose. This starts all services (UI, Agent, Neo4j) with a pre-populated database.
 
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) or [Podman](https://podman.io/getting-started/installation)
 - Docker Compose or Podman Compose
+- An OpenAI or Anthropic API key
 - If using Podman, ensure your VM has at least 6GB of memory:
   ```bash
   podman machine stop
@@ -89,29 +91,53 @@ For containerized development with hot-reloading, you can use Docker Compose (or
   podman machine start
   ```
 
-### Configuration
+### Step 1: Set Up Neo4j Data
 
-Create a `.env` file in the project root with your configuration:
+The agent requires a pre-populated Neo4j database. Place the database files in `data/neo4jdata/`:
 
-```bash
-# Required: LLM API key (set one)
-OPENAI_API_KEY=your-openai-api-key
-
-# Optional: Alternative LLM provider
-# ANTHROPIC_API_KEY=your-anthropic-api-key
-
-# Optional: Neo4j password (defaults to "localdev123")
-# NEO4J_PASSWORD=localdev123
+```
+data/
+  neo4jdata/
+    databases/
+      neo4j/
+        ...
+      system/
+        ...
+    transactions/
+      ...
 ```
 
-### Running with Docker Compose
+You can obtain the database files from:
+- Ask a team member for the `neo4jdata` folder
+- Or download from the shared drive (ask in Slack)
+
+### Step 2: Configure Environment
+
+Copy the example environment file and add your API key:
 
 ```bash
-# Start all services (UI, Agent, Neo4j)
+cp .env.example .env
+```
+
+Then edit `.env` and set your LLM API key:
+
+```bash
+# Required: Set ONE of these
+OPENAI_API_KEY=your-openai-api-key
+# or
+ANTHROPIC_API_KEY=your-anthropic-api-key
+```
+
+See `.env.example` for all available configuration options.
+
+### Step 3: Start Services
+
+```bash
+# Using Docker
 docker compose up -d
 
 # Or with Podman
-podman compose up -d
+podman-compose up -d
 
 # View logs
 docker compose logs -f
@@ -126,7 +152,14 @@ docker compose down
 |---------|-----|-------------|
 | **UI** | http://localhost:3000 | Next.js frontend with CopilotKit |
 | **Agent** | http://localhost:8123 | LangGraph agent server |
-| **Neo4j Browser** | http://localhost:7474 | Graph database admin UI |
+| **Neo4j Browser** | http://localhost:7474 | Graph database admin UI (no auth required) |
+
+### Verify It's Working
+
+1. Open http://localhost:7474 - You should see the Neo4j Browser
+2. Run this query to verify data: `MATCH (n:JiraDocument) RETURN count(n)`
+3. Open http://localhost:3000 - The UI should load
+4. Ask the agent: "Who should I talk to about llm-d?"
 
 ### Development Workflow
 
@@ -138,6 +171,20 @@ To rebuild after dependency changes:
 ```bash
 docker compose up -d --build
 ```
+
+### Troubleshooting Docker Compose
+
+**Neo4j fails to start:**
+- Ensure `data/neo4jdata` exists and contains the database files
+- Check that you're using Neo4j 2025 compatible data (the compose file uses `neo4j:2025`)
+
+**Agent can't connect to Neo4j:**
+- Verify Neo4j is running: `docker compose ps`
+- Check logs: `docker compose logs neo4j`
+
+**UI shows connection errors:**
+- Wait for all services to fully start (can take 30-60 seconds)
+- Check agent logs: `docker compose logs agent`
 
 ## Customization
 
