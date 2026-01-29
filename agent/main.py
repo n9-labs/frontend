@@ -7,7 +7,8 @@ Integrates with Atlassian MCP server for real Jira/Confluence access
 import os
 import asyncio
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
+from pydantic_settings import BaseSettings  # type: ignore
 from langchain.tools import tool
 from langchain.agents import create_agent
 from langchain.agents.middleware.types import AgentState as LangChainAgentState
@@ -16,6 +17,58 @@ from copilotkit import CopilotKitMiddleware
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import Connection
 from typing_extensions import NotRequired
+
+
+class Settings(BaseSettings):
+    """Centralized env-driven configuration for local/dev deploys."""
+
+    # Load from agent/.env if present, plus real env vars.
+    model_config = {"env_file": ".env", "extra": "ignore"}
+
+    # API key (assume good intent):
+    # - exactly one of OPENAI_API_KEY or ANTHROPIC_API_KEY must be set
+    openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
+    anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
+    api_key: str = Field(default="")
+
+    # Agent/model
+    model: str = Field(default="claude-sonnet-4-5", validation_alias="N9_AGENT_MODEL")
+
+    # Atlassian MCP (Jira required; Confluence optional)
+    jira_url: str = Field(default="", validation_alias="JIRA_URL")
+    jira_username: str = Field(default="", validation_alias="JIRA_USERNAME")
+    jira_api_token: str = Field(default="", validation_alias="JIRA_API_TOKEN")
+    jira_personal_token: str = Field(default="", validation_alias="JIRA_PERSONAL_TOKEN")
+
+    confluence_url: str = Field(default="", validation_alias="CONFLUENCE_URL")
+    confluence_username: str = Field(default="", validation_alias="CONFLUENCE_USERNAME")
+    confluence_api_token: str = Field(
+        default="", validation_alias="CONFLUENCE_API_TOKEN"
+    )
+    confluence_personal_token: str = Field(
+        default="", validation_alias="CONFLUENCE_PERSONAL_TOKEN"
+    )
+
+    @model_validator(mode="after")
+    def _resolve_api_key(self) -> "Settings":
+        openai = (self.openai_api_key or "").strip()
+        anthropic = (self.anthropic_api_key or "").strip()
+
+        provided = [k for k in (openai, anthropic) if k]
+        if len(provided) == 0:
+            raise ValueError(
+                "Missing API key: set exactly one of OPENAI_API_KEY or ANTHROPIC_API_KEY."
+            )
+        if len(provided) > 1:
+            raise ValueError(
+                "Ambiguous API key: set only one of OPENAI_API_KEY or ANTHROPIC_API_KEY (not both)."
+            )
+
+        self.api_key = provided[0]
+        return self
+
+
+settings = Settings()
 
 
 class Person(BaseModel):
@@ -396,17 +449,17 @@ MCP_SERVERS: dict[str, Connection] = {
         "args": ["mcp-atlassian"],
         "env": {
             # Jira URL (required)
-            "JIRA_URL": os.getenv("JIRA_URL", ""),
+            "JIRA_URL": settings.jira_url,
             # For Jira Cloud: use USERNAME + API_TOKEN
-            "JIRA_USERNAME": os.getenv("JIRA_USERNAME", ""),
-            "JIRA_API_TOKEN": os.getenv("JIRA_API_TOKEN", ""),
+            "JIRA_USERNAME": settings.jira_username,
+            "JIRA_API_TOKEN": settings.jira_api_token,
             # For Jira Server/Data Center (on-prem): use PERSONAL_TOKEN instead
-            "JIRA_PERSONAL_TOKEN": os.getenv("JIRA_PERSONAL_TOKEN", ""),
+            "JIRA_PERSONAL_TOKEN": settings.jira_personal_token,
             # Confluence (optional)
-            "CONFLUENCE_URL": os.getenv("CONFLUENCE_URL", ""),
-            "CONFLUENCE_USERNAME": os.getenv("CONFLUENCE_USERNAME", ""),
-            "CONFLUENCE_API_TOKEN": os.getenv("CONFLUENCE_API_TOKEN", ""),
-            "CONFLUENCE_PERSONAL_TOKEN": os.getenv("CONFLUENCE_PERSONAL_TOKEN", ""),
+            "CONFLUENCE_URL": settings.confluence_url,
+            "CONFLUENCE_USERNAME": settings.confluence_username,
+            "CONFLUENCE_API_TOKEN": settings.confluence_api_token,
+            "CONFLUENCE_PERSONAL_TOKEN": settings.confluence_personal_token,
         },
     }
 }
@@ -423,9 +476,9 @@ async def load_tools():
     tools = []
 
     # Check if Atlassian MCP is configured
-    jira_configured = os.getenv("JIRA_URL") and (
-        os.getenv("JIRA_PERSONAL_TOKEN")
-        or (os.getenv("JIRA_USERNAME") and os.getenv("JIRA_API_TOKEN"))
+    jira_configured = bool(settings.jira_url) and bool(
+        settings.jira_personal_token
+        or (settings.jira_username and settings.jira_api_token)
     )
 
     if not jira_configured:
@@ -453,7 +506,7 @@ async def load_tools():
 all_tools = asyncio.run(load_tools())
 
 agent = create_agent(
-    model="claude-sonnet-4-5",
+    model=settings.model,
     tools=all_tools,
     middleware=[CopilotKitMiddleware()],
     state_schema=ExpertFinderState,

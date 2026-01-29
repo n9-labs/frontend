@@ -35,9 +35,15 @@ bun install
 > **Note:** Installing the package dependencies will also install the agent's python dependencies via the `install:agent` script.
 
 
-2. Set up your OpenAI API key:
+2. Set up your environment variables:
 ```bash
-echo 'OPENAI_API_KEY=your-openai-api-key-here' > agent/.env
+cp .env.example .env
+# Edit .env and add your API key
+```
+
+Your `.env` file should contain:
+```
+OPENAI_API_KEY=your-openai-api-key-here
 ```
 
 3. Start the development server:
@@ -68,14 +74,79 @@ The following scripts can also be run using your preferred package manager:
 - `lint` - Runs ESLint for code linting
 - `install:agent` - Installs Python dependencies for the agent
 
-## Documentation
+## Docker Compose (Containerized Development)
+
+For containerized development with hot-reloading, you can use Docker Compose (or Podman Compose).
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) or [Podman](https://podman.io/getting-started/installation)
+- Docker Compose or Podman Compose
+- If using Podman, ensure your VM has at least 6GB of memory:
+  ```bash
+  podman machine stop
+  podman machine set --memory 6144
+  podman machine start
+  ```
+
+### Configuration
+
+Create a `.env` file in the project root with your configuration:
+
+```bash
+# Required: LLM API key (set one)
+OPENAI_API_KEY=your-openai-api-key
+
+# Optional: Alternative LLM provider
+# ANTHROPIC_API_KEY=your-anthropic-api-key
+
+# Optional: Neo4j password (defaults to "localdev123")
+# NEO4J_PASSWORD=localdev123
+```
+
+### Running with Docker Compose
+
+```bash
+# Start all services (UI, Agent, Neo4j)
+docker compose up -d
+
+# Or with Podman
+podman compose up -d
+
+# View logs
+docker compose logs -f
+
+# Stop all services
+docker compose down
+```
+
+### Services
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| **UI** | http://localhost:3000 | Next.js frontend with CopilotKit |
+| **Agent** | http://localhost:8123 | LangGraph agent server |
+| **Neo4j Browser** | http://localhost:7474 | Graph database admin UI |
+
+### Development Workflow
+
+The compose setup includes volume mounts for hot-reloading:
+- UI: Changes to `src/` and `public/` are reflected immediately
+- Agent: Changes to `agent/` trigger automatic reloads
+
+To rebuild after dependency changes:
+```bash
+docker compose up -d --build
+```
+
+## Customization
 
 The main UI component is in `src/app/page.tsx`. You can:
 - Modify the theme colors and styling
 - Add new frontend actions
 - Customize the CopilotKit sidebar appearance
 
-## 📚 Documentation
+## Documentation
 
 - [LangGraph Documentation](https://langchain-ai.github.io/langgraph/) - Learn more about LangGraph and its features
 - [CopilotKit Documentation](https://docs.copilotkit.ai) - Explore CopilotKit's capabilities
@@ -94,12 +165,12 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ### Agent Connection Issues
 If you see "I'm having trouble connecting to my tools", make sure:
-1. The LangGraph agent is running on port 8000
-2. Your OpenAI API key is set correctly
+1. The LangGraph agent is running on port 8123
+2. Your OpenAI API key is set correctly in `.env`
 3. Both servers started successfully
 
 ### Python Dependencies
 If you encounter Python import errors:
 ```bash
-npm install:agent
+npm run install:agent
 ```
