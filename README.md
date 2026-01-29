@@ -37,13 +37,14 @@ bun install
 
 2. Set up your environment variables:
 ```bash
-cp .env.example .env
-# Edit .env and add your API key
+touch .env
 ```
 
 Your `.env` file should contain:
 ```
 OPENAI_API_KEY=your-openai-api-key-here
+ANTHROPIC_API_KEY=your-anthropic-api-key-here
+MODEL=model-for-your-agent
 ```
 
 3. Start the development server:
