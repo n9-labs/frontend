@@ -1,0 +1,13 @@
+langchain==1.2.0
+langgraph==1.0.5
+langsmith>=0.4.49
+anthropic<1.0.0,>=0.40.0
+fastapi<1.0.0,>=0.115.5
+uvicorn<1.0.0,>=0.29.0
+python-dotenv<2.0.0,>=1.0.0
+langgraph-cli[inmem]>=0.4.11
+langchain-anthropic>=0.3.0
+copilotkit>=0.1.74
+langgraph-api>=0.6.0
+langchain-mcp-adapters<0.2.0,>=0.1.0
+mcp>=1.0.0
