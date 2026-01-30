@@ -3,6 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   snapshotDir: "./e2e/snapshots",
+  // Use platform-agnostic snapshot names for cross-platform compatibility
+  snapshotPathTemplate: "{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}{ext}",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -13,6 +15,12 @@ export default defineConfig({
     baseURL: "http://localhost:3000",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+  },
+  expect: {
+    toHaveScreenshot: {
+      // Higher threshold for cross-platform font rendering differences
+      maxDiffPixelRatio: 0.1,
+    },
   },
   projects: [
     {

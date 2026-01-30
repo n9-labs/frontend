@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main, rag_connection]
   pull_request:
     branches: [main, rag_connection]
 

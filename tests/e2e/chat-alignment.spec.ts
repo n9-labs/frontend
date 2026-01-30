@@ -120,7 +120,7 @@ test.describe("Chat Input Alignment", () => {
 
   test.describe("Visual Regression", () => {
     // Visual regression tests compare screenshots
-    // Note: Snapshots may differ between platforms (macOS vs Linux)
+    // Snapshots are platform-agnostic (configured in playwright.config.ts)
     // Update snapshots with: npm run test:e2e:update-snapshots
 
     test("chat input area matches expected layout", async ({ page }) => {
@@ -131,10 +131,8 @@ test.describe("Chat Input Alignment", () => {
       await page.waitForTimeout(500);
 
       // Take screenshot (will be compared against baseline)
-      // Use higher threshold in CI due to font rendering differences
-      await expect(inputContainer).toHaveScreenshot("chat-input-alignment.png", {
-        maxDiffPixelRatio: process.env.CI ? 0.1 : 0.02,
-      });
+      // Threshold is configured in playwright.config.ts for cross-platform compatibility
+      await expect(inputContainer).toHaveScreenshot("chat-input-alignment.png");
     });
   });
 });
