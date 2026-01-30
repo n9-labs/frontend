@@ -104,6 +104,10 @@ test.describe("Chat Input Alignment", () => {
   });
 
   test.describe("Visual Regression", () => {
+    // Skip visual regression in CI - snapshots are platform-specific (macOS vs Linux)
+    // Run locally with: npm run test:e2e:update-snapshots
+    test.skip(!!process.env.CI, "Visual regression tests are platform-specific");
+    
     test("chat input area matches expected layout", async ({ page }) => {
       // Take a screenshot of the input area for visual comparison
       const inputContainer = page.locator(".copilotKitInput");

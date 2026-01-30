@@ -8,6 +8,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? "github" : "list",
+  timeout: 30000,
   use: {
     baseURL: "http://localhost:3000",
     trace: "on-first-retry",
@@ -19,13 +20,15 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  // Web server config
-  // - CI: Build and start the production server
-  // - Local: Reuse existing dev server (start with `npm run dev` first)
-  webServer: {
-    command: process.env.CI ? "npm run build && npm run start" : "echo 'Using existing server'",
-    url: "http://localhost:3000",
-    reuseExistingServer: true,
-    timeout: 120 * 1000,
-  },
+  // Web server configuration
+  // CI: starts the production server after build
+  // Local: assumes dev server is already running (start with `npm run dev` first)
+  webServer: process.env.CI
+    ? {
+        command: "npm run start",
+        url: "http://localhost:3000",
+        reuseExistingServer: false,
+        timeout: 120000,
+      }
+    : undefined,
 });
