@@ -1,71 +1,40 @@
 "use client";
 
-import { WeatherCard } from "@/components/weather";
-import { MoonCard } from "@/components/moon";
 import {
   useCoAgent,
   useDefaultTool,
-  useFrontendTool,
-  useHumanInTheLoop,
-  useRenderToolCall,
   useCopilotChat,
 } from "@copilotkit/react-core";
 import { CopilotKitCSSProperties, CopilotChat } from "@copilotkit/react-ui";
+import "@copilotkit/react-ui/styles.css";
 import { Role, TextMessage } from "@copilotkit/runtime-client-gql";
 import { useState, FormEvent, useEffect, useRef } from "react";
 
 export default function CopilotKitPage() {
-  const [themeColor, setThemeColor] = useState("#6366f1");
   const [showChat, setShowChat] = useState(false);
   const [initialMessage, setInitialMessage] = useState("");
-
-  // 🪁 Frontend Actions: https://docs.copilotkit.ai/pydantic-ai/frontend-actions
-  useFrontendTool({
-    name: "setThemeColor",
-    parameters: [
-      {
-        name: "themeColor",
-        description: "The theme color to set. Make sure to pick nice colors.",
-        required: true,
-      },
-    ],
-    handler({ themeColor }: { themeColor: string }): void {
-      setThemeColor(themeColor);
-    },
-  });
 
   const handleStartChat = (message: string) => {
     setInitialMessage(message);
     setShowChat(true);
   };
 
+  const customStyles = {
+    "--copilot-kit-background-color": "#111827",
+    "--copilot-kit-secondary-color": "#1f2937",
+    "--copilot-kit-primary-color": "#6366f1",
+    "--copilot-kit-contrast-color": "#ffffff",
+    "--copilot-kit-secondary-contrast-color": "#e5e7eb",
+    "--copilot-kit-separator-color": "#374151",
+    "--copilot-kit-muted-color": "#6b7280",
+  } as CopilotKitCSSProperties;
+
   return (
-    <main
-      style={
-        { 
-          "--copilot-kit-primary-color": "#6366f1",
-          "--copilot-kit-background-color": "#111827",
-          "--copilot-kit-secondary-color": "#1f2937",
-          "--copilot-kit-secondary-contrast-color": "#f3f4f6",
-          "--copilot-kit-separator-color": "rgba(75, 85, 99, 0.3)",
-        } as CopilotKitCSSProperties
-      }
-      className="h-screen"
-    >
+    <main style={customStyles} className="h-screen bg-gray-900">
       {!showChat ? (
         <LandingPage onStartChat={handleStartChat} />
       ) : (
-        <>
-          <ChatContent themeColor={themeColor} initialMessage={initialMessage} />
-          <CopilotChat
-            labels={{
-              title: "Expert Finder",
-              initial: "👋 Ask me who to talk to about any feature, team, or expert in OpenShift AI!",
-            }}
-            instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
-            className="h-full copilotKitChat"
-          />
-        </>
+        <ChatContent initialMessage={initialMessage} />
       )}
     </main>
   );
@@ -127,7 +96,7 @@ function LandingPage({ onStartChat }: { onStartChat: (message: string) => void }
             <input
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => setQuery(e.target.value)}
               placeholder="Ask about any feature, team, or expert..."
               className="w-full px-6 py-4 bg-gray-800/50 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent backdrop-blur-sm transition-all"
             />
@@ -141,28 +110,6 @@ function LandingPage({ onStartChat }: { onStartChat: (message: string) => void }
             </button>
           </div>
         </form>
-        
-        {/* Action Buttons */}
-        <div className="flex gap-4 mb-16">
-          <button className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg border border-gray-700 transition-all flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            Browse JIRAs
-          </button>
-          <button className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg border border-gray-700 transition-all flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-            </svg>
-            Search Code
-          </button>
-          <button className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg border border-gray-700 transition-all flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Get Help
-          </button>
-        </div>
         
         {/* Suggested Prompts */}
         <div className="w-full max-w-3xl">
@@ -195,7 +142,7 @@ function LandingPage({ onStartChat }: { onStartChat: (message: string) => void }
   );
 }
 
-function ChatContent({ themeColor, initialMessage }: { themeColor: string; initialMessage: string }) {
+function ChatContent({ initialMessage }: { initialMessage: string }) {
   // 🪁 Shared State: https://docs.copilotkit.ai/pydantic-ai/shared-state
   useCoAgent({
     name: "expert_finder_agent",
@@ -232,23 +179,9 @@ function ChatContent({ themeColor, initialMessage }: { themeColor: string; initi
     }
   }, [initialMessage, appendMessage, isLoading]);
 
-  //🪁 Generative UI: https://docs.copilotkit.ai/pydantic-ai/generative-ui
-  useRenderToolCall(
-    {
-      name: "get_weather",
-      description: "Get the weather for a given location.",
-      parameters: [{ name: "location", type: "string", required: true }],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      render: ({ args }: { args: any }) => {
-        return <WeatherCard location={args.location} themeColor={themeColor} />;
-      },
-    },
-    [themeColor],
-  );
 
   useDefaultTool({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    render: ({ name, status, args, result }: { name: string; status: string; args: any; result: any }) => {
+    render: ({ name, status, args, result }) => {
       const isJiraTool = name.includes("jira_");
       
       if (isJiraTool) {
@@ -262,7 +195,7 @@ function ChatContent({ themeColor, initialMessage }: { themeColor: string; initi
             {args && (
               <div className="text-sm text-gray-300 mb-2">
                 <span className="font-medium">Query:</span>
-                <div className="bg-gray-900/50 p-2 rounded mt-1 font-mono text-xs text-indigo-300 border border-gray-700">
+                <div className="bg-gray-900/50 p-2 rounded mt-1 font-mono text-xs text-gray-400 break-all">
                   {args.jql || args.issue_key || args.user_identifier || JSON.stringify(args)}
                 </div>
               </div>
@@ -289,7 +222,7 @@ function ChatContent({ themeColor, initialMessage }: { themeColor: string; initi
       }
       
       // Default rendering for non-JIRA tools
-      const textStyles = "text-gray-400 text-sm mt-2";
+      const textStyles = "text-gray-500 text-sm mt-2";
       if (status !== "complete") {
         return <p className={textStyles}>Calling {name}...</p>;
       }
@@ -297,20 +230,16 @@ function ChatContent({ themeColor, initialMessage }: { themeColor: string; initi
     },
   })
 
-  // 🪁 Human In the Loop: https://docs.copilotkit.ai/pydantic-ai/human-in-the-loop
-  useHumanInTheLoop(
-    {
-      name: "go_to_moon",
-      description: "Go to the moon on request.",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      render: ({ respond, status }: { respond: any; status: "inProgress" | "executing" | "complete" }) => {
-        return (
-          <MoonCard themeColor={themeColor} status={status} respond={respond} />
-        );
-      },
-    },
-    [themeColor],
+  return (
+    <div className="h-full">
+      <CopilotChat
+        labels={{
+          title: "Expert Finder",
+          placeholder: "Ask about any feature, team, or expert...",
+        }}
+        instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
+        className="h-full"
+      />
+    </div>
   );
-
-  return null; // Chat UI is rendered by CopilotChat
 }
