@@ -34,7 +34,10 @@ export default function CopilotKitPage() {
       {!showChat ? (
         <LandingPage onStartChat={handleStartChat} />
       ) : (
-        <ChatContent initialMessage={initialMessage} />
+        <ChatContent 
+          initialMessage={initialMessage} 
+          onBack={() => setShowChat(false)} 
+        />
       )}
     </main>
   );
@@ -142,7 +145,7 @@ function LandingPage({ onStartChat }: { onStartChat: (message: string) => void }
   );
 }
 
-function ChatContent({ initialMessage }: { initialMessage: string }) {
+function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBack: () => void }) {
   // 🪁 Shared State: https://docs.copilotkit.ai/pydantic-ai/shared-state
   useCoAgent({
     name: "expert_finder_agent",
@@ -234,16 +237,39 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
   })
 
   return (
-    <div className="h-full">
-      <CopilotChat
-        labels={{
-          title: "Expert Finder",
-          placeholder: "Type a message...",
-        }}
-        instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
-        className="h-full"
-        showActivityIndicator={true}
-      />
+    <div className="h-full flex flex-col">
+      {/* Navigation Header - subtle, fades into background */}
+      <div className="px-6 py-4 shrink-0 bg-gradient-to-b from-gray-900/80 to-transparent">
+        <button
+          onClick={onBack}
+          className="group flex items-center gap-2 text-gray-500 hover:text-gray-200 transition-all duration-200"
+        >
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            className="h-4 w-4 group-hover:-translate-x-0.5 transition-transform" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          <span className="text-sm font-medium">Back</span>
+        </button>
+      </div>
+      
+      {/* Chat Area */}
+      <div className="flex-1 min-h-0">
+        <CopilotChat
+          labels={{
+            title: "Expert Finder",
+            placeholder: "Type a message...",
+          }}
+          instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
+          className="h-full"
+          showActivityIndicator={true}
+        />
+      </div>
     </div>
   );
 }
