@@ -2,20 +2,24 @@
 Expert Finder Agent - Finds the right people to talk to about features
 Uses RAG search and graph traversal to identify experts from JIRA data
 Integrates with Atlassian MCP server for real Jira/Confluence access
+
+Built using LangGraph Graph API (StateGraph) for explicit control over
+the agent workflow, nodes, and edges.
 """
 
 import asyncio
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings  # type: ignore
 from langchain.tools import tool
-from langchain.agents import create_agent
-from langchain.agents.middleware.types import AgentState as LangChainAgentState
-from langchain_core.messages import HumanMessage
-from copilotkit import CopilotKitMiddleware
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import Connection
-from typing_extensions import NotRequired
+from langgraph.graph import StateGraph, START, END
+from langgraph.prebuilt import ToolNode
+from langgraph.checkpoint.memory import MemorySaver
+from copilotkit import CopilotKitState
+from copilotkit.langgraph import copilotkit_customize_config
 
 
 class Settings(BaseSettings):
@@ -132,25 +136,23 @@ class Expert(BaseModel):
     linked_jiras: List[str]
 
 
-class ExpertFinderState(LangChainAgentState):
+class ExpertFinderState(CopilotKitState):
     """
-    LangGraph agent state *schema*.
+    LangGraph agent state schema extending CopilotKitState.
 
-    `create_agent(..., state_schema=...)` uses this for typing and schema-merging
-    (it is not something you instantiate like a Pydantic model).
+    CopilotKitState already includes:
+    - messages: List of messages (from MessagesState)
+    - copilotkit: CopilotKit properties (actions, context, etc.)
     """
 
-    # Provided by CopilotKitMiddleware at runtime (and by `make_initial_state` for local runs)
-    copilotkit: NotRequired[dict]
-
-    query: NotRequired[str]
-    rag_results: NotRequired[List[Jira]]
-    graph_results: NotRequired[List[Jira]]
-    experts: NotRequired[List[Expert]]
-    search_phase: NotRequired[str]
+    query: str
+    rag_results: List[Jira]
+    graph_results: List[Jira]
+    experts: List[Expert]
+    search_phase: str
 
 
-def make_initial_state(user_message: str) -> ExpertFinderState:
+def make_initial_state(user_message: str) -> dict:
     """
     Canonical local initializer for this agent's runtime state dict.
 
@@ -173,109 +175,6 @@ def make_initial_state(user_message: str) -> ExpertFinderState:
         "search_phase": "idle",
     }
 
-
-# Mock data for development - represents JIRAs from OpenShift AI
-MOCK_JIRAS = {
-    "RHOAIENG-4521": Jira(
-        id="RHOAIENG-4521",
-        type="EPIC",
-        summary="Experiment Tracking Dashboard",
-        description="Build a comprehensive experiment tracking dashboard for MLflow integration",
-        assignee=Person(
-            name="Sarah Chen", email="schen@redhat.com", slack_id="U123ABC"
-        ),
-        reporter=Person(name="Rachel Kim", email="rkim@redhat.com", slack_id="U789XYZ"),
-        components=["dashboard", "mlflow", "frontend"],
-        team="ML/AI",
-        status="In Progress",
-    ),
-    "RHOAIENG-4102": Jira(
-        id="RHOAIENG-4102",
-        type="RFE",
-        summary="MLflow experiment comparison feature",
-        description="Allow users to compare multiple experiments side-by-side",
-        assignee=Person(
-            name="James Morrison", email="jmorrison@redhat.com", slack_id="U456DEF"
-        ),
-        reporter=Person(name="Alice Patel", email="apatel@redhat.com"),
-        components=["mlflow", "ui"],
-        status="Approved",
-    ),
-    "RHOAIENG-3845": Jira(
-        id="RHOAIENG-3845",
-        type="STORY",
-        summary="Add distributed training support for PyTorch",
-        description="Implement distributed training capabilities using PyTorch DDP with Kubeflow",
-        assignee=Person(name="David Kumar", email="dkumar@redhat.com"),
-        components=["training", "pytorch", "kubeflow"],
-        team="Platform",
-        status="In Progress",
-    ),
-    "RHOAIENG-4522": Jira(
-        id="RHOAIENG-4522",
-        type="STORY",
-        summary="Implement experiment metrics visualization",
-        description="Create interactive charts for experiment metrics tracking",
-        assignee=Person(
-            name="Mike Johnson", email="mjohnson@redhat.com", slack_id="U234GHI"
-        ),
-        components=["frontend", "dashboard", "visualization"],
-        team="Frontend",
-        status="In Review",
-    ),
-    "RHOAIENG-4089": Jira(
-        id="RHOAIENG-4089",
-        type="EPIC",
-        summary="Q3 Experiment Tracking Strategy",
-        description="Define product strategy for experiment tracking features",
-        assignee=Person(name="Rachel Kim", email="rkim@redhat.com", slack_id="U789XYZ"),
-        components=["strategy", "mlflow"],
-        status="Closed",
-    ),
-    "RHOAIENG-3901": Jira(
-        id="RHOAIENG-3901",
-        type="EPIC",
-        summary="Kubeflow Distributed Training Integration",
-        description="Deep integration of Kubeflow for distributed training workloads",
-        assignee=Person(name="Lisa Zhang", email="lzhang@redhat.com"),
-        components=["kubeflow", "training", "gpu"],
-        team="Platform",
-        status="In Progress",
-    ),
-    "RHOAIENG-3846": Jira(
-        id="RHOAIENG-3846",
-        type="BUG",
-        summary="KubeRay operator fails to schedule ray workers",
-        description="KubeRay operator intermittently fails to schedule workers",
-        assignee=Person(name="Alex Rodriguez", email="arodriguez@redhat.com"),
-        reporter=Person(name="David Kumar", email="dkumar@redhat.com"),
-        components=["kuberay", "scheduling"],
-        team="Platform",
-        status="In Progress",
-    ),
-    "RHOAIENG-3847": Jira(
-        id="RHOAIENG-3847",
-        type="STORY",
-        summary="Add Ray cluster autoscaling support",
-        description="Implement autoscaling capabilities for Ray clusters",
-        assignee=Person(name="Alex Rodriguez", email="arodriguez@redhat.com"),
-        components=["kuberay", "autoscaling"],
-        team="Platform",
-        status="In Review",
-    ),
-    "RHOAIENG-4103": Jira(
-        id="RHOAIENG-4103",
-        type="STORY",
-        summary="Create experiment tagging and search system",
-        description="Build tagging system for experiments with advanced search",
-        assignee=Person(
-            name="Sarah Chen", email="schen@redhat.com", slack_id="U123ABC"
-        ),
-        components=["mlflow", "search", "backend"],
-        team="ML/AI",
-        status="In Progress",
-    ),
-}
 
 
 @tool
@@ -590,51 +489,6 @@ def list_jira_labels() -> str:
         return f"Error listing labels: {e}"
 
 
-# Keep mock tools as fallback when Neo4j is not available
-@tool
-def search_jira_vectors(query: str) -> str:
-    """
-    [MOCK/FALLBACK] Perform semantic search on JIRA descriptions to find relevant issues.
-    This uses mock data when Neo4j is not available.
-
-    Args:
-        query: The search query (e.g., "experiment tracking dashboard")
-
-    Returns:
-        Summary of JIRA issues that match the query semantically
-    """
-    query_lower = query.lower()
-    results = []
-
-    for jira in MOCK_JIRAS.values():
-        summary_lower = jira.summary.lower()
-        desc_lower = (jira.description or "").lower()
-
-        if any(
-            word in summary_lower or word in desc_lower for word in query_lower.split()
-        ):
-            results.append(jira)
-
-    top_results = results[:5]
-    if not top_results:
-        return "No matching JIRAs found (using mock data)"
-
-    output = f"Found {len(top_results)} relevant JIRAs (mock data):\n\n"
-    for jira in top_results:
-        output += f"**{jira.id}** ({jira.type}): {jira.summary}\n"
-        if jira.assignee:
-            output += f"  Assignee: {jira.assignee.name} ({jira.assignee.email})\n"
-        if jira.reporter:
-            output += f"  Reporter: {jira.reporter.name} ({jira.reporter.email})\n"
-        if jira.team:
-            output += f"  Team: {jira.team}\n"
-        if jira.components:
-            output += f"  Components: {', '.join(jira.components)}\n"
-        output += f"  Status: {jira.status}\n\n"
-
-    return output
-
-
 # System prompt with role inference guidelines
 SYSTEM_PROMPT = """You are an expert finder for Red Hat AI. Your job is to help users 
 find the right people to talk to about features, products, or technical questions.
@@ -788,8 +642,7 @@ async def load_tools():
         print("   - list_jira_labels: List all available labels")
     else:
         # Fall back to mock tools
-        tools.extend([search_jira_vectors])
-        print("[WARN] Neo4j not available - using mock tools")
+        print("[WARN] Neo4j not available")
 
     # Check if Atlassian MCP is configured
     jira_configured = bool(settings.jira_url) and bool(
@@ -821,12 +674,115 @@ async def load_tools():
 
 all_tools = asyncio.run(load_tools())
 
-agent = create_agent(
-    model=settings.model,
-    tools=all_tools,
-    middleware=[CopilotKitMiddleware()],
-    state_schema=ExpertFinderState,
-    system_prompt=SYSTEM_PROMPT,
-)
 
-graph = agent
+# ---------------------------------------------------------------------------
+# LangGraph Graph API: Build the agent workflow with StateGraph
+# ---------------------------------------------------------------------------
+
+def get_model():
+    """
+    Initialize the LLM based on configured API key (OpenAI or Anthropic).
+    """
+    if settings.openai_api_key:
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(
+            model=settings.model,
+            api_key=settings.openai_api_key,
+            streaming=True,
+        )
+    elif settings.anthropic_api_key:
+        from langchain_anthropic import ChatAnthropic
+        return ChatAnthropic(
+            model=settings.model,
+            api_key=settings.anthropic_api_key,
+            streaming=True,
+        )
+    else:
+        raise ValueError("No API key configured")
+
+
+# Get the model and bind tools to it
+model = get_model()
+model_with_tools = model.bind_tools(all_tools)
+
+
+# Define the agent node that calls the LLM
+async def agent_node(state: ExpertFinderState) -> dict:
+    """
+    The agent node that calls the LLM with the current messages and tools.
+    The LLM decides whether to respond directly or call tools.
+    """
+    messages = state.get("messages", [])
+    
+    # Add system prompt if not already present
+    if not messages or not isinstance(messages[0], SystemMessage):
+        messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
+    
+    # Get frontend tools from CopilotKit state and merge with backend tools
+    copilotkit_state = state.get("copilotkit", {})
+    frontend_actions = copilotkit_state.get("actions", [])
+    
+    # Create model with merged tools if frontend actions exist
+    if frontend_actions:
+        merged_tools = all_tools + frontend_actions
+        model_to_use = model.bind_tools(merged_tools)
+    else:
+        model_to_use = model_with_tools
+    
+    # Call the LLM
+    response = await model_to_use.ainvoke(messages)
+    
+    return {"messages": [response]}
+
+
+# Define the conditional edge to determine next step
+def should_continue(state: ExpertFinderState) -> Literal["tools", END]:
+    """
+    Determines whether to continue to tools or end the conversation.
+    
+    If the last message has tool calls, route to tools node.
+    Otherwise, end the conversation.
+    """
+    messages = state.get("messages", [])
+    if not messages:
+        return END
+    
+    last_message = messages[-1]
+    
+    # Check if the last message is an AI message with tool calls
+    if isinstance(last_message, AIMessage) and last_message.tool_calls:
+        return "tools"
+    
+    return END
+
+
+
+# Create the tool node using LangGraph's prebuilt ToolNode
+# handle_tool_errors=True ensures that if a frontend tool is called
+# (which isn't in our tools list), it won't crash - just returns an error message
+tool_node = ToolNode(all_tools, handle_tool_errors=True)
+
+
+# Build the StateGraph workflow
+workflow = StateGraph(ExpertFinderState)
+
+# Add nodes
+workflow.add_node("agent", agent_node)
+workflow.add_node("tools", tool_node)
+
+# Add edges
+workflow.add_edge(START, "agent")  # Start with the agent
+workflow.add_conditional_edges(
+    "agent",
+    should_continue,
+    {
+        "tools": "tools",
+        END: END,
+    }
+)
+workflow.add_edge("tools", "agent")  # After tools, go back to agent
+
+# Compile the graph with memory for persistence
+# memory = MemorySaver()
+# graph = workflow.compile(checkpointer=memory)
+graph = workflow.compile()
