@@ -176,7 +176,6 @@ def make_initial_state(user_message: str) -> dict:
     }
 
 
-
 @tool
 def search_jira_text(query: str, limit: int = 10) -> str:
     """
@@ -395,6 +394,70 @@ def find_experts_by_topic(topic: str, limit: int = 10) -> str:
 
 
 @tool
+def find_jiras_by_person(person_name: str, limit: int = 10) -> str:
+    """
+    Find JIRAs that a specific person is working on or has worked on.
+    Searches by assignee name (case-insensitive partial match).
+
+    Args:
+        person_name: The name of the person to search for (e.g., "Russell Bryant", "Bryant")
+        limit: Maximum number of JIRAs to return (default 10)
+
+    Returns:
+        List of JIRAs assigned to or reported by that person
+    """
+    driver = get_neo4j_driver()
+    if driver is None:
+        return "Error: Unable to connect to Neo4j database"
+
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (j:JiraDocument)
+                WHERE toLower(j.assignee) CONTAINS toLower($person_name)
+                   OR toLower(j.reporter) CONTAINS toLower($person_name)
+                RETURN DISTINCT j.key as key, j.title as title, j.issue_type as issue_type,
+                       j.status as status, j.assignee as assignee, j.reporter as reporter,
+                       j.project as project, j.labels as labels, j.priority as priority,
+                       j.url as url, j.updated_at as updated_at
+                ORDER BY updated_at DESC
+                LIMIT $limit
+                """,
+                person_name=person_name,
+                limit=limit,
+            )
+
+            records = list(result)
+            if not records:
+                return f"No JIRAs found for person: '{person_name}'"
+
+            output = f"Found {len(records)} JIRAs for '{person_name}':\n\n"
+            for record in records:
+                output += (
+                    f"**{record['key']}** ({record['issue_type']}): {record['title']}\n"
+                )
+                if record["assignee"]:
+                    output += f"  Assignee: {record['assignee']}\n"
+                if record["reporter"]:
+                    output += f"  Reporter: {record['reporter']}\n"
+                output += f"  Project: {record['project']}\n"
+                if record["labels"]:
+                    output += f"  Labels: {', '.join(record['labels'])}\n"
+                output += (
+                    f"  Status: {record['status']} | Priority: {record['priority']}\n"
+                )
+                if record["url"]:
+                    output += f"  URL: {record['url']}\n"
+                output += "\n"
+
+            return output
+
+    except Exception as e:
+        return f"Error finding JIRAs for person: {e}"
+
+
+@tool
 def find_experts_by_label(labels: List[str], limit: int = 10) -> str:
     """
     Find people who are experts based on JIRA labels.
@@ -512,6 +575,7 @@ The database contains JIRAs from Red Hat AI projects with these properties:
 - **search_jira_text(query, limit)**: Keyword search on JIRA titles and content
 - **find_experts_by_topic(topic, limit)**: Find people ranked by JIRAs on a topic
 - **find_experts_by_label(labels, limit)**: Find people by JIRA labels
+- **find_jiras_by_person(person_name, limit)**: Find JIRAs assigned to or reported by a person
 - **get_jira_details(jira_key)**: Get full details of a specific JIRA
 - **list_jira_labels()**: See all available labels in the database
 
@@ -530,10 +594,15 @@ The database contains JIRAs from Red Hat AI projects with these properties:
    
    Example: find_experts_by_label(["MaaS"]) -> Returns experts in MaaS area
 
-4. **Search for Context**: Use `search_jira_text` to find relevant JIRAs and understand
+4. **Find What Someone is Working On**: When asked "What is [person] working on?", use 
+   `find_jiras_by_person` to find JIRAs assigned to or reported by that person.
+   
+   Example: find_jiras_by_person("Russell Bryant") -> Returns JIRAs Russell is working on
+
+5. **Search for Context**: Use `search_jira_text` to find relevant JIRAs and understand
    what work is being done. Then use `get_jira_details` for full descriptions.
 
-5. **Synthesize Results**: Combine findings to recommend the best contacts.
+6. **Synthesize Results**: Combine findings to recommend the best contacts.
 
 ## Role Inference Guidelines
 
@@ -640,6 +709,7 @@ async def load_tools():
                 get_jira_details,
                 find_experts_by_topic,
                 find_experts_by_label,
+                find_jiras_by_person,
                 list_jira_labels,
             ]
         )
@@ -649,6 +719,7 @@ async def load_tools():
         print("   - get_jira_details: Get full JIRA details")
         print("   - find_experts_by_topic: Find experts by topic keywords")
         print("   - find_experts_by_label: Find experts by JIRA labels")
+        print("   - find_jiras_by_person: Find JIRAs by assignee/reporter name")
         print("   - list_jira_labels: List all available labels")
     else:
         # Fall back to mock tools
@@ -689,12 +760,14 @@ all_tools = asyncio.run(load_tools())
 # LangGraph Graph API: Build the agent workflow with StateGraph
 # ---------------------------------------------------------------------------
 
+
 def get_model():
     """
     Initialize the LLM based on configured API key (OpenAI or Anthropic).
     """
     if settings.openai_api_key:
         from langchain_openai import ChatOpenAI
+
         return ChatOpenAI(
             model=settings.model,
             api_key=settings.openai_api_key,
@@ -702,6 +775,7 @@ def get_model():
         )
     elif settings.anthropic_api_key:
         from langchain_anthropic import ChatAnthropic
+
         return ChatAnthropic(
             model=settings.model,
             api_key=settings.anthropic_api_key,
@@ -723,25 +797,25 @@ async def agent_node(state: ExpertFinderState) -> dict:
     The LLM decides whether to respond directly or call tools.
     """
     messages = state.get("messages", [])
-    
+
     # Add system prompt if not already present
     if not messages or not isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
-    
+
     # Get frontend tools from CopilotKit state and merge with backend tools
     copilotkit_state = state.get("copilotkit", {})
     frontend_actions = copilotkit_state.get("actions", [])
-    
+
     # Create model with merged tools if frontend actions exist
     if frontend_actions:
         merged_tools = all_tools + frontend_actions
         model_to_use = model.bind_tools(merged_tools)
     else:
         model_to_use = model_with_tools
-    
+
     # Call the LLM
     response = await model_to_use.ainvoke(messages)
-    
+
     return {"messages": [response]}
 
 
@@ -749,22 +823,21 @@ async def agent_node(state: ExpertFinderState) -> dict:
 def should_continue(state: ExpertFinderState) -> Literal["tools", END]:
     """
     Determines whether to continue to tools or end the conversation.
-    
+
     If the last message has tool calls, route to tools node.
     Otherwise, end the conversation.
     """
     messages = state.get("messages", [])
     if not messages:
         return END
-    
+
     last_message = messages[-1]
-    
+
     # Check if the last message is an AI message with tool calls
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return "tools"
-    
-    return END
 
+    return END
 
 
 # Create the tool node using LangGraph's prebuilt ToolNode
@@ -788,7 +861,7 @@ workflow.add_conditional_edges(
     {
         "tools": "tools",
         END: END,
-    }
+    },
 )
 workflow.add_edge("tools", "agent")  # After tools, go back to agent
 
