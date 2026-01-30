@@ -3,43 +3,51 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   snapshotDir: "./e2e/snapshots",
-  // Use platform-agnostic snapshot names for cross-platform compatibility
   snapshotPathTemplate: "{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}{ext}",
+  
+  // Parallelization - run tests in parallel for speed
   fullyParallel: true,
+  
+  // CI-specific settings
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? "github" : "list",
-  timeout: 30000,
+  retries: process.env.CI ? 1 : 0,  // Reduced from 2 to 1 retry
+  workers: process.env.CI ? 2 : undefined,  // Increased from 1 to 2 parallel workers
+  
+  // Reporter
+  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
+  
+  // Timeouts - reduced for faster failure detection
+  timeout: 15000,  // Reduced from 30s to 15s per test
+  expect: {
+    timeout: 5000,  // 5s for assertions
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.1,
+    },
+  },
+  
+  // Browser settings
   use: {
     baseURL: "http://localhost:3000",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
-  },
-  expect: {
-    toHaveScreenshot: {
-      // Higher threshold for cross-platform font rendering differences
-      maxDiffPixelRatio: 0.1,
+    // Speed optimizations
+    launchOptions: {
+      args: ["--disable-gpu", "--no-sandbox"],
     },
   },
+  
   projects: [
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
   ],
+  
   // Web server configuration
-  // CI: uses production build (npm run start) - requires prior npm run build
-  // Local: uses dev server (npm run dev) - hot reload, no build required
-  // 
-  // IMPORTANT: For E2E tests, set NEXT_PUBLIC_E2E_TEST_MODE=true at BUILD time
-  // to disable CopilotKit's agent connection (which requires a real backend)
-  // In CI, this is done in the workflow: NEXT_PUBLIC_E2E_TEST_MODE=true npm run build
-  // Locally: NEXT_PUBLIC_E2E_TEST_MODE=true npm run dev
   webServer: {
     command: process.env.CI ? "npm run start" : "NEXT_PUBLIC_E2E_TEST_MODE=true npm run dev",
     url: "http://localhost:3000",
     reuseExistingServer: true,
-    timeout: 120000,
+    timeout: 60000,  // Reduced from 120s to 60s
   },
 });

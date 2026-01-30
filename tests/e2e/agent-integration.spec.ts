@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 /**
  * Integration tests that require a real CopilotKit agent backend
  * 
- * These tests are SKIPPED in CI (where NEXT_PUBLIC_E2E_TEST_MODE=true)
+ * These tests are SKIPPED in CI (where CI=true)
  * Run locally with a real backend:
  *   1. Start the agent: cd agent && uv run main.py
  *   2. Build without test mode: npm run build
@@ -13,10 +13,11 @@ import { test, expect } from "@playwright/test";
  *   npx playwright test tests/e2e/agent-integration.spec.ts
  */
 
-// Skip all tests in this file when in E2E test mode (no real backend)
+// Skip all tests in this file in CI (no real backend available)
+// The CI env var is set by GitHub Actions
 test.skip(
-  () => process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true",
-  "Agent integration tests require a real backend"
+  () => !!process.env.CI,
+  "Agent integration tests require a real backend (skipped in CI)"
 );
 
 test.describe("Agent Integration", () => {

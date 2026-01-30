@@ -181,7 +181,7 @@ function TestModeChatContent({ initialMessage, onBack }: { initialMessage: strin
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          <span className="text-sm font-medium">New Chat</span>
+          <span className="text-sm font-medium">Back</span>
         </button>
       </div>
 
