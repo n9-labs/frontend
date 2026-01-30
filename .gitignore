@@ -52,3 +52,4 @@ next-env.d.ts
 
 # Local Neo4j data (keep data/ but ignore the database files)
 data/neo4jdata/
+data/neo4jdata_backup/

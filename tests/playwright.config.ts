@@ -1,8 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
-  testDir: "./tests/e2e",
-  snapshotDir: "./tests/e2e/snapshots",
+  testDir: "./e2e",
+  snapshotDir: "./e2e/snapshots",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -21,13 +21,13 @@ export default defineConfig({
     },
   ],
   // Web server configuration
-  // CI: starts the production server after build
+  // CI: starts the production server after build (reuses if already running)
   // Local: assumes dev server is already running (start with `npm run dev` first)
   webServer: process.env.CI
     ? {
         command: "npm run start",
         url: "http://localhost:3000",
-        reuseExistingServer: false,
+        reuseExistingServer: true,
         timeout: 120000,
       }
     : undefined,

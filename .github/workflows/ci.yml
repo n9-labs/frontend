@@ -73,7 +73,7 @@ jobs:
         run: npm run build
 
       - name: Run Playwright E2E tests
-        run: npx playwright test
+        run: npx playwright test --config tests/playwright.config.ts
         env:
           CI: true
 

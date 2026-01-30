@@ -1,7 +1,14 @@
 import { test, expect } from "@playwright/test";
+import { setupCopilotKitMock } from "./fixtures/copilotkit-mock";
 
 test.describe("Chat Input Alignment", () => {
   test.beforeEach(async ({ page }) => {
+    // Setup mock for CopilotKit API
+    await setupCopilotKitMock(page, {
+      responseText: "I found some experts for your query.",
+      delayMs: 50,
+    });
+
     await page.goto("/");
     // Navigate to chat view
     await page.click('button:has-text("Model Serving experts")');
@@ -9,14 +16,18 @@ test.describe("Chat Input Alignment", () => {
     await expect(page.getByPlaceholder("Type a message...")).toBeVisible();
   });
 
-  test("textarea and submit button are vertically centered", async ({ page }) => {
+  test("textarea and submit button are vertically centered", async ({
+    page,
+  }) => {
     // Get the input container
     const inputContainer = page.locator(".copilotKitInput");
     await expect(inputContainer).toBeVisible();
 
     // Get textarea and button bounding boxes
     const textarea = page.locator(".copilotKitInput textarea");
-    const submitButton = page.locator(".copilotKitInputControlButton, .copilotKitInput button").first();
+    const submitButton = page
+      .locator(".copilotKitInputControlButton, .copilotKitInput button")
+      .first();
 
     const textareaBox = await textarea.boundingBox();
     const buttonBox = await submitButton.boundingBox();
@@ -29,7 +40,7 @@ test.describe("Chat Input Alignment", () => {
       const textareaCenter = textareaBox.y + textareaBox.height / 2;
       const buttonCenter = buttonBox.y + buttonBox.height / 2;
 
-      // They should be roughly aligned (within 10px tolerance)
+      // They should be roughly aligned (within 20px tolerance)
       const verticalDifference = Math.abs(textareaCenter - buttonCenter);
       expect(verticalDifference).toBeLessThan(20);
     }
@@ -39,21 +50,23 @@ test.describe("Chat Input Alignment", () => {
     const inputContainer = page.locator(".copilotKitInput");
 
     // Check that container uses flexbox for alignment
-    const display = await inputContainer.evaluate((el) =>
-      window.getComputedStyle(el).display
+    const display = await inputContainer.evaluate(
+      (el) => window.getComputedStyle(el).display
     );
     expect(display).toBe("flex");
 
     // Check items are centered
-    const alignItems = await inputContainer.evaluate((el) =>
-      window.getComputedStyle(el).alignItems
+    const alignItems = await inputContainer.evaluate(
+      (el) => window.getComputedStyle(el).alignItems
     );
     expect(alignItems).toBe("center");
   });
 
   test("submit button is positioned at the right side", async ({ page }) => {
     const inputContainer = page.locator(".copilotKitInput");
-    const submitButton = page.locator(".copilotKitInputControlButton, .copilotKitInput button").first();
+    const submitButton = page
+      .locator(".copilotKitInputControlButton, .copilotKitInput button")
+      .first();
 
     const containerBox = await inputContainer.boundingBox();
     const buttonBox = await submitButton.boundingBox();
@@ -99,25 +112,28 @@ test.describe("Chat Input Alignment", () => {
     await expect(textarea).toHaveValue("Test message");
 
     // Submit button should be visible
-    const submitButton = page.locator(".copilotKitInputControlButton, button[name='Send']").first();
+    const submitButton = page
+      .locator(".copilotKitInputControlButton, button[name='Send']")
+      .first();
     await expect(submitButton).toBeVisible();
   });
 
   test.describe("Visual Regression", () => {
-    // Skip visual regression in CI - snapshots are platform-specific (macOS vs Linux)
-    // Run locally with: npm run test:e2e:update-snapshots
-    test.skip(!!process.env.CI, "Visual regression tests are platform-specific");
-    
+    // Visual regression tests compare screenshots
+    // Note: Snapshots may differ between platforms (macOS vs Linux)
+    // Update snapshots with: npm run test:e2e:update-snapshots
+
     test("chat input area matches expected layout", async ({ page }) => {
       // Take a screenshot of the input area for visual comparison
       const inputContainer = page.locator(".copilotKitInput");
-      
+
       // Ensure it's fully rendered
       await page.waitForTimeout(500);
 
-      // Take screenshot (will be compared in CI)
+      // Take screenshot (will be compared against baseline)
+      // Use higher threshold in CI due to font rendering differences
       await expect(inputContainer).toHaveScreenshot("chat-input-alignment.png", {
-        maxDiffPixels: 100, // Allow small variations
+        maxDiffPixelRatio: process.env.CI ? 0.1 : 0.02,
       });
     });
   });
