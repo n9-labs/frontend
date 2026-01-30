@@ -1,4 +1,4 @@
-name: Expert Finder CI Pipeline
+name: CI
 
 on:
   push:
