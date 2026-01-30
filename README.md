@@ -137,7 +137,7 @@ See `.env.example` for all available configuration options.
 docker compose up -d
 
 # Or with Podman
-podman-compose up -d
+podman compose up -d
 
 # View logs
 docker compose logs -f

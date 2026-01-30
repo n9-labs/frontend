@@ -224,6 +224,7 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
 
   useDefaultTool({
     render: ({ name, status, args, result }) => {
+      console.log('render', { name, status, args, result });
       const isJiraTool = name.includes("jira_");
       
       if (isJiraTool) {
@@ -292,13 +293,29 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
           </div>
         );
       }
-      
-      // Default rendering for non-JIRA tools
-      const textStyles = "text-gray-500 text-sm mt-2";
-      if (status !== "complete") {
-        return <p className={textStyles}>Calling {name}...</p>;
-      }
-      return <p className={textStyles}>Called {name}!</p>;
+
+      const displayArgs = args && Object.entries(args).map(([key, value]) => `${key}: ${value}`).join(', ');
+
+      return (
+        <div className="bg-gray-800/50 backdrop-blur-sm p-4 rounded-lg shadow-md my-2 border border-gray-700">
+          <div className="flex items-center gap-2 mb-2">
+            <div className={`w-2 h-2 rounded-full ${status === "complete" ? "bg-green-500" : "bg-indigo-500 animate-pulse"}`} />
+            <span className="font-semibold text-gray-100">Database search: {name}</span>
+          </div>
+          {status !== "complete" ? (
+            <div className="flex items-center gap-2 text-sm text-indigo-400">
+              <div className="animate-spin h-3 w-3 border-2 border-indigo-400 border-t-transparent rounded-full" />
+              <span>Searching our database using {name}{displayArgs && ` with the following arguments: ${displayArgs}` || ''}</span>
+            </div>
+          ) : (
+            <div className="text-sm text-green-400 font-medium">
+              {(() => {               
+                return <>✓ Completed the {name} call{displayArgs && ` with the following arguments: ${displayArgs}` || '!'}</>;
+              })()}
+            </div>
+          )}
+        </div>
+      )
     },
   })
 
