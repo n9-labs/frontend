@@ -4,7 +4,7 @@
   "dependencies": ["."],
   "package_manager": "uv",
   "graphs": {
-    "expert_finder_agent": "./main.py:graph"
+    "org_chat_agent": "./main.py:graph"
   },
   "env": ".env"
 }

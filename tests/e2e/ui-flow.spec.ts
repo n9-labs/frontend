@@ -1,26 +1,21 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * E2E tests for Expert Finder UI
+ * E2E tests for Org Chat UI
  * 
  * These tests run with NEXT_PUBLIC_E2E_TEST_MODE=true which disables
  * CopilotKit's agent connection, allowing us to test the UI without
  * requiring a real backend.
  */
 
-test.describe("Expert Finder Landing Page", () => {
+test.describe("Org Chat Landing Page", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
   });
 
-  test("displays main heading and subtitle", async ({ page }) => {
+  test("displays main heading", async ({ page }) => {
     // Check main heading
-    await expect(page.locator("h1")).toContainText("Who Do I Talk To?");
-
-    // Check subtitle
-    await expect(
-      page.getByText("Find the right experts in OpenShift AI")
-    ).toBeVisible();
+    await expect(page.locator("h1")).toContainText("Find Answers Fast");
   });
 
   test("displays search input", async ({ page }) => {
@@ -60,8 +55,8 @@ test.describe("Expert Finder Landing Page", () => {
   });
 
   test("page has correct visual structure", async ({ page }) => {
-    // Check the icon is displayed
-    await expect(page.getByText("🔍")).toBeVisible();
+    // Check the logo is displayed
+    await expect(page.locator('img[alt="Org Chat"]')).toBeVisible();
 
     // Check "Suggested" label is visible
     await expect(page.getByText("Suggested")).toBeVisible();
@@ -120,7 +115,7 @@ test.describe("Chat Navigation", () => {
     await page.click('button:has-text("Back")');
 
     // Should be back on landing page
-    await expect(page.locator("h1")).toContainText("Who Do I Talk To?");
+    await expect(page.locator("h1")).toContainText("Find Answers Fast");
     await expect(
       page.getByPlaceholder("Ask about any feature, team, or expert...")
     ).toBeVisible();

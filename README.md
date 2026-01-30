@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/logo.png" alt="Org Chat" width="400">
+</p>
+
 # Org Chat
 
 Find subject matter experts in your organization by querying a knowledge graph of JIRA tickets. Have you ever needed help with something but didnt know who to ask? Rather than go on a goose chase, chat with this tool which uses ingested Jira data to make educated guesses to your questions about your coworkers.
@@ -8,7 +12,7 @@ Find subject matter experts in your organization by querying a knowledge graph o
 
 - [Docker Desktop](https://docs.docker.com/get-docker/) or [Podman](https://podman.io/getting-started/installation)
 - Docker Compose (included with Docker Desktop)
-- **6GB+ RAM** allocated to Docker/Podman (for Neo4j)
+- **6GB+ RAM** allocated to Docker/Podman to enable next js with hot reload
 - An OpenAI or Anthropic API key
 - Neo4j database files (ask a team member for the `neo4jdata` folder)
 
@@ -89,14 +93,15 @@ flowchart LR
 | Component | Technology | Description |
 |-----------|------------|-------------|
 | **UI** | Next.js + CopilotKit | Chat interface |
-| **Agent** | LangGraph + Python | Expert-finding tools |
+| **Agent** | LangGraph + Python | Rag tools |
 | **Neo4j** | Graph Database | JIRA tickets & relationships |
 
 ## Documentation
 
+- [Configuration Guide](./docs/configuration.md) - Environment variables reference
+- [AGENTS.md](./AGENTS.md) - AI agent context for this codebase
 - [CopilotKit Docs](https://docs.copilotkit.ai)
 - [LangGraph Docs](https://langchain-ai.github.io/langgraph/)
-- [AGENTS.md](./AGENTS.md) - AI agent context for this codebase
 
 ## License
 

@@ -27,8 +27,8 @@ export default function CopilotKitPage() {
   };
 
   const customStyles = {
-    "--copilot-kit-background-color": "#111827",
-    "--copilot-kit-secondary-color": "#1f2937",
+    "--copilot-kit-background-color": "#1f2937",
+    "--copilot-kit-secondary-color": "#374151",
     "--copilot-kit-primary-color": "#6366f1",
     "--copilot-kit-contrast-color": "#ffffff",
     "--copilot-kit-secondary-contrast-color": "#e5e7eb",
@@ -37,7 +37,7 @@ export default function CopilotKitPage() {
   } as CopilotKitCSSProperties;
 
   return (
-    <main style={customStyles} className="h-screen bg-gray-900">
+    <main style={customStyles} className="h-screen bg-gray-800">
       {!showChat ? (
         <LandingPage onStartChat={handleStartChat} />
       ) : isE2ETestMode ? (
@@ -90,21 +90,16 @@ function LandingPage({ onStartChat }: { onStartChat: (message: string) => void }
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 flex flex-col items-center justify-start">
+    <div className="min-h-screen bg-gradient-to-b from-gray-800 to-gray-700 flex flex-col items-center justify-start">
       {/* Hero Section */}
-      <div className="w-full max-w-4xl mx-auto px-6 pt-32 pb-12 flex flex-col items-center">
-        {/* Icon */}
-        <div className="mb-8 text-6xl">🔍</div>
+      <div className="w-full max-w-4xl mx-auto px-6 pt-12 pb-12 flex flex-col items-center">
+        {/* Logo */}
+        <img src="/logo.png" alt="Org Chat" className="mb-4 w-80 h-80" />
         
         {/* Title */}
-        <h1 className="text-5xl font-bold text-white mb-4 text-center">
-          Who Do I Talk To?
+        <h1 className="text-5xl font-bold text-white mb-12 text-center">
+          Find Answers Fast
         </h1>
-        
-        {/* Subtitle */}
-        <p className="text-xl text-gray-400 mb-12 text-center">
-          Find the right experts in OpenShift AI
-        </p>
         
         {/* Search Input - Now functional! */}
         <form onSubmit={handleSubmit} className="w-full max-w-2xl mb-8">
@@ -220,7 +215,7 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
   const lastErrorRef = useRef<string | null>(null);
   // 🪁 Shared State: https://docs.copilotkit.ai/pydantic-ai/shared-state
   const { state } = useCoAgent({
-    name: "expert_finder_agent",
+    name: "org_chat_agent",
   });
 
   const { appendMessage, reset, isLoading } = useCopilotChat();
@@ -459,10 +454,10 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
       <div className="flex-1 min-h-0">
         <CopilotChat
           labels={{
-            title: "Expert Finder",
+            title: "Org Chat",
             placeholder: "Type a message...",
           }}
-          instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
+          instructions="You are Org Chat, an assistant that helps users find the right people to talk to about features, teams, and technical topics in OpenShift AI."
           className="h-full"
         />
       </div>
