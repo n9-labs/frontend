@@ -159,15 +159,19 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
     // Retry until appendMessage succeeds - this handles the timing issue
     // where the chat might not be fully initialized yet
     const sendMessage = async () => {
+      // Double-check we haven't already submitted (race condition protection)
+      if (hasSubmittedRef.current) return;
+      
       try {
+        hasSubmittedRef.current = true; // Set BEFORE to prevent duplicate calls
         await appendMessage(
           new TextMessage({
             content: initialMessage,
             role: Role.User,
           })
         );
-        hasSubmittedRef.current = true;
       } catch (error) {
+        hasSubmittedRef.current = false; // Reset on failure to allow retry
         // If it fails, retry after a short delay
         setTimeout(sendMessage, 200);
       }
@@ -178,7 +182,6 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
       sendMessage();
     }
   }, [initialMessage, appendMessage, isLoading]);
-
 
   useDefaultTool({
     render: ({ name, status, args, result }) => {
@@ -235,10 +238,11 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
       <CopilotChat
         labels={{
           title: "Expert Finder",
-          placeholder: "Ask about any feature, team, or expert...",
+          placeholder: "Type a message...",
         }}
         instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
         className="h-full"
+        showActivityIndicator={true}
       />
     </div>
   );
