@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
     api_key: str = Field(default="")
 
+    # Vertex for Anthropic
+    anthropic_use_vertex: str = Field(default="", validation_alias="ANTHROPIC_USE_VERTEX")
+    anthropic_vertex_model: str = Field(default="claude-sonnet-4@20250514", validation_alias="ANTHROPIC_MODEL")
+    anthropic_vertex_project: str = Field(default="", validation_alias="ANTHROPIC_VERTEX_PROJECT_ID")
+    anthropic_vertex_region: str = Field(default="", validation_alias="ANTHROPIC_VERTEX_REGION")
+
     # Agent/model
     model: str = Field(default="claude-sonnet-4-5", validation_alias="N9_AGENT_MODEL")
 
@@ -63,6 +69,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _resolve_api_key(self) -> "Settings":
+        if self.anthropic_use_vertex == "1":
+            self.api_key = ""
+            return self
+
         openai = (self.openai_api_key or "").strip()
         anthropic = (self.anthropic_api_key or "").strip()
 
@@ -767,7 +777,15 @@ def get_model():
     """
     Initialize the LLM based on configured API key (OpenAI or Anthropic).
     """
-    if settings.openai_api_key:
+    if settings.anthropic_use_vertex == "1":
+        from langchain_google_vertexai.model_garden import ChatAnthropicVertex
+
+        return ChatAnthropicVertex(
+            model_name=settings.anthropic_vertex_model,
+            project=settings.anthropic_vertex_project,
+            location=settings.anthropic_vertex_region,
+        )
+    elif settings.openai_api_key:
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
