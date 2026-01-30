@@ -45,11 +45,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# lock files
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-bun.lockb
+# Note: package-lock.json is committed for reproducible CI builds
 
 # LangGraph API
 .langgraph_api
