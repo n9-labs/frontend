@@ -224,7 +224,6 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
 
   useDefaultTool({
     render: ({ name, status, args, result }) => {
-      console.log('render', { name, status, args, result });
       const isJiraTool = name.includes("jira_");
       
       if (isJiraTool) {
