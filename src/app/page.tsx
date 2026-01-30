@@ -305,12 +305,24 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
           {status !== "complete" ? (
             <div className="flex items-center gap-2 text-sm text-indigo-400">
               <div className="animate-spin h-3 w-3 border-2 border-indigo-400 border-t-transparent rounded-full" />
-              <span>Searching our database using {name}{displayArgs && ` with the following arguments: ${displayArgs}` || ''}</span>
+              <span>
+                <div>Searching our database using {name}{displayArgs && ' with the following arguments:' || ''}</div>
+                {displayArgs && <div className="bg-gray-900/50 p-2 rounded mt-1 font-mono text-xs text-gray-400 break-all">
+                  {displayArgs}
+                </div>}
+              </span>
             </div>
           ) : (
             <div className="text-sm text-green-400 font-medium">
               {(() => {               
-                return <>✓ Completed the {name} call{displayArgs && ` with the following arguments: ${displayArgs}` || '!'}</>;
+                return (
+                  <>
+                    <div>✓ Completed the {name} call{displayArgs && ' with the following arguments:' || '!'}</div>
+                    {displayArgs && <div className="bg-gray-900/50 p-2 rounded mt-1 font-mono text-xs text-gray-400 break-all">
+                      {displayArgs}
+                    </div>}
+                  </>
+                );
               })()}
             </div>
           )}
