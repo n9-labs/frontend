@@ -75,6 +75,67 @@ The following scripts can also be run using your preferred package manager:
 - `lint` - Runs ESLint for code linting
 - `install:agent` - Installs Python dependencies for the agent
 
+### Testing Scripts
+- `test` - Run unit tests with Jest
+- `test:watch` - Run unit tests in watch mode
+- `test:coverage` - Run unit tests with coverage report
+- `test:e2e` - Run end-to-end tests with Playwright
+- `test:e2e:headed` - Run E2E tests with visible browser
+- `test:e2e:ui` - Open Playwright UI for interactive testing
+- `test:all` - Run both unit and E2E tests
+
+## Testing
+
+This project includes comprehensive testing to prevent regressions.
+
+### Test Structure
+
+```
+tests/
+├── unit/                    # Jest unit tests
+│   └── ChatContent.test.tsx # Tests for duplicate message prevention
+└── e2e/                     # Playwright E2E tests
+    ├── ui-flow.spec.ts      # Landing page, navigation, chat flow
+    ├── chat-alignment.spec.ts # Input alignment and styling
+    └── snapshots/           # Visual regression baselines
+```
+
+### Running Tests
+
+```bash
+# Install dev dependencies (includes test frameworks)
+npm install
+
+# Run unit tests
+npm run test
+
+# Run E2E tests (requires dev server running)
+npm run dev:ui &  # Start dev server in background
+npm run test:e2e
+
+# Run all tests
+npm run test:all
+```
+
+### Dependencies
+
+| Type | Installation | Use Case |
+|------|--------------|----------|
+| `dependencies` | `npm install --omit=dev` | Production runtime |
+| `devDependencies` | `npm install` | Development + testing |
+
+Test frameworks (Jest, Playwright) are in `devDependencies` and excluded from production builds.
+
+### CI/CD
+
+GitHub Actions runs on every push to `main`/`rag_connection` and on PRs:
+- **Lint**: ESLint checks
+- **Unit Tests**: Jest with coverage
+- **E2E Tests**: Playwright browser tests
+- **Build**: Production build verification
+
+See `.github/workflows/ci.yml` for the full workflow.
+
 ## Quick Start with Docker Compose
 
 The fastest way to get running is with Docker Compose. This starts all services (UI, Agent, Neo4j) with a pre-populated database.

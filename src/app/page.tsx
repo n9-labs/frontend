@@ -388,7 +388,6 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
           }}
           instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
           className="h-full"
-          showActivityIndicator={true}
         />
       </div>
     </div>
