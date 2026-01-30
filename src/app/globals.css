@@ -32,36 +32,39 @@ html {
   background: transparent;
 }
 
+/* Hide CopilotKit's built-in header since we have our own */
 .copilotKitHeader {
-  background: #1f2937;
-  border-bottom: 1px solid #374151;
+  display: none !important;
 }
 
 .copilotKitInput {
   background: #1f2937 !important;
   border-top: 1px solid #374151;
+  display: flex !important;
+  align-items: center !important;
 }
 
-/* CopilotKit textarea - match container background, white text */
-.copilotKitChat textarea,
-.copilotKitInput textarea,
-div[class*="copilotKit"] textarea {
-  background: transparent !important;
+/* Vertically center the button control */
+.copilotKitInputControl {
+  display: flex !important;
+  align-items: center !important;
+}
+
+.copilotKitInputControlButton {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* CopilotKit textarea - white text for dark theme */
+.copilotKitInput textarea {
   color: #ffffff !important;
   caret-color: #ffffff !important;
   -webkit-text-fill-color: #ffffff !important;
-  opacity: 1 !important;
-  border: none !important;
 }
 
 .copilotKitInput textarea::placeholder {
   color: #6b7280 !important;
-}
-
-.copilotKitInput textarea:focus {
-  outline: none !important;
-  border: none !important;
-  box-shadow: none !important;
 }
 
 .copilotKitUserMessage {
@@ -72,4 +75,9 @@ div[class*="copilotKit"] textarea {
 .copilotKitAssistantMessage {
   background: #374151;
   color: #e5e7eb;
+}
+
+/* Hide CopilotKit web inspector dev banner */
+cpk-web-inspector {
+  display: none !important;
 }

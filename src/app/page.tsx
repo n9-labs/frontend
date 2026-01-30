@@ -34,7 +34,10 @@ export default function CopilotKitPage() {
       {!showChat ? (
         <LandingPage onStartChat={handleStartChat} />
       ) : (
-        <ChatContent initialMessage={initialMessage} />
+        <ChatContent 
+          initialMessage={initialMessage} 
+          onBack={() => setShowChat(false)} 
+        />
       )}
     </main>
   );
@@ -142,10 +145,9 @@ function LandingPage({ onStartChat }: { onStartChat: (message: string) => void }
   );
 }
 
-function ChatContent({ initialMessage }: { initialMessage: string }) {
+function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBack: () => void }) {
   const [agentError, setAgentError] = useState<string | null>(null);
   const lastErrorRef = useRef<string | null>(null);
-  
   // 🪁 Shared State: https://docs.copilotkit.ai/pydantic-ai/shared-state
   const { state } = useCoAgent({
     name: "expert_finder_agent",
@@ -201,16 +203,21 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
     // Retry until appendMessage succeeds - this handles the timing issue
     // where the chat might not be fully initialized yet
     const sendMessage = async () => {
+      // Double-check we haven't already submitted (race condition protection)
+      if (messageSent.current) return;
+      
       try {
+        // Set BEFORE await to prevent duplicate calls during async operation
+        messageSent.current = true;
         await appendMessage(
           new TextMessage({
             content: initialMessage,
             role: Role.User,
           })
         );
-        messageSent.current = true;
       } catch {
-        // If it fails, retry after a short delay
+        // Reset on failure to allow retry
+        messageSent.current = false;
         setTimeout(sendMessage, 200);
       }
     };
@@ -220,7 +227,6 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
       sendMessage();
     }
   }, [initialMessage, appendMessage, isLoading]);
-
 
   useDefaultTool({
     render: ({ name, status, args, result }) => {
@@ -304,9 +310,29 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
 
   return (
     <div className="h-full flex flex-col">
+      {/* Navigation Header - subtle, fades into background */}
+      <div className="px-6 py-4 shrink-0 bg-gradient-to-b from-gray-900/80 to-transparent">
+        <button
+          onClick={onBack}
+          className="group flex items-center gap-2 text-gray-500 hover:text-gray-200 transition-all duration-200"
+        >
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            className="h-4 w-4 group-hover:-translate-x-0.5 transition-transform" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          <span className="text-sm font-medium">Back</span>
+        </button>
+      </div>
+
       {/* Error Banner */}
       {agentError && (
-        <div className="bg-red-900/20 border border-red-500/50 text-red-200 px-4 py-3 mx-4 mt-4 rounded-lg flex items-start gap-3">
+        <div className="bg-red-900/20 border border-red-500/50 text-red-200 px-4 py-3 mx-4 rounded-lg flex items-start gap-3">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
           </svg>
@@ -325,14 +351,16 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
         </div>
       )}
       
-      <div className="flex-1">
+      {/* Chat Area */}
+      <div className="flex-1 min-h-0">
         <CopilotChat
           labels={{
             title: "Expert Finder",
-            placeholder: "Ask about any feature, team, or expert...",
+            placeholder: "Type a message...",
           }}
           instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
           className="h-full"
+          showActivityIndicator={true}
         />
       </div>
     </div>
