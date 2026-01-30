@@ -220,7 +220,7 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
   
   // 🪁 Shared State: https://docs.copilotkit.ai/pydantic-ai/shared-state
   const coAgent = useCoAgent({
-    name: "expert_finder_agent",
+    name: "org_chat_agent",
   });
   
   const { state } = coAgent;
