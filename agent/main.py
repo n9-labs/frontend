@@ -8,6 +8,7 @@ the agent workflow, nodes, and edges.
 """
 
 import asyncio
+import uuid
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings  # type: ignore
@@ -150,6 +151,7 @@ class ExpertFinderState(CopilotKitState):
     graph_results: List[Jira]
     experts: List[Expert]
     search_phase: str
+    error: Optional[str] = None  # Store error messages for frontend display
 
 
 def make_initial_state(user_message: str) -> dict:
@@ -785,6 +787,41 @@ def get_model():
         raise ValueError("No API key configured")
 
 
+
+def trim_tool_response(content: str, max_chars: int = 10000) -> str:
+    """
+    Trim a tool response that's too large to prevent context overflow.
+    
+    Strategy:
+    - Keep first portion (usually most relevant)
+    - Keep last portion (often contains summary/conclusion)
+    - Add truncation notice in the middle
+    
+    Args:
+        content: The tool response content
+        max_chars: Maximum characters to keep (default 10k chars ≈ 2.5k tokens)
+    
+    Returns:
+        Trimmed content with truncation notice
+    """
+    if len(content) <= max_chars:
+        return content
+    
+    # Calculate how much to keep from start and end
+    keep_start = int(max_chars * 0.7)  # 70% from start
+    keep_end = int(max_chars * 0.3)    # 30% from end
+    
+    start_content = content[:keep_start]
+    end_content = content[-keep_end:]
+    
+    truncated_chars = len(content) - max_chars
+    truncation_notice = f"\n\n... [TRUNCATED {truncated_chars:,} characters to prevent context overflow] ...\n\n"
+    
+    return start_content + truncation_notice + end_content
+
+
+
+
 # Get the model and bind tools to it
 model = get_model()
 model_with_tools = model.bind_tools(all_tools)
@@ -796,27 +833,54 @@ async def agent_node(state: ExpertFinderState) -> dict:
     The agent node that calls the LLM with the current messages and tools.
     The LLM decides whether to respond directly or call tools.
     """
-    messages = state.get("messages", [])
+    try:
+        messages = state.get("messages", [])
+        
+        # Add system prompt if not already present
+        if not messages or not isinstance(messages[0], SystemMessage):
+            messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
+        
+        # Trim oversized tool responses in existing messages
+        for msg in messages:
+            if isinstance(msg, ToolMessage):
+                if isinstance(msg.content, str) and len(msg.content) > 10000:
+                    msg.content = trim_tool_response(msg.content)
+            elif isinstance(msg, AIMessage):
+                if isinstance(msg.content, str) and len(msg.content) > 50000:
+                    msg.content = trim_tool_response(msg.content, max_chars=50000)
 
-    # Add system prompt if not already present
-    if not messages or not isinstance(messages[0], SystemMessage):
-        messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
-
-    # Get frontend tools from CopilotKit state and merge with backend tools
-    copilotkit_state = state.get("copilotkit", {})
-    frontend_actions = copilotkit_state.get("actions", [])
-
-    # Create model with merged tools if frontend actions exist
-    if frontend_actions:
-        merged_tools = all_tools + frontend_actions
-        model_to_use = model.bind_tools(merged_tools)
-    else:
-        model_to_use = model_with_tools
-
-    # Call the LLM
-    response = await model_to_use.ainvoke(messages)
-
-    return {"messages": [response]}
+        # Get frontend tools from CopilotKit state and merge with backend tools
+        copilotkit_state = state.get("copilotkit", {})
+        frontend_actions = copilotkit_state.get("actions", [])
+        
+        # Create model with merged tools if frontend actions exist
+        if frontend_actions:
+            merged_tools = all_tools + frontend_actions
+            model_to_use = model.bind_tools(merged_tools)
+        else:
+            model_to_use = model_with_tools
+        
+        # Call the LLM
+        response = await model_to_use.ainvoke(messages)
+        
+        return {"messages": [response]}
+    except Exception as e:
+        # Capture error and add it to state for frontend display
+        error_msg = f"Agent error: {type(e).__name__}: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        
+        # Create an error message that will be displayed to the user
+        # Generate a proper ID to avoid null/None issues with CopilotKit's Zod validation
+        error_response = AIMessage(
+            content=f"⚠️ **An error occurred while processing your request:**\n\n```\n{error_msg}\n```",
+            id=str(uuid.uuid4())  # Ensure id is a string, not None
+        )
+        
+        # Return error state - store error in state for frontend access
+        return {
+            "messages": [error_response],
+            "error": error_msg
+        }
 
 
 # Define the conditional edge to determine next step
@@ -843,7 +907,26 @@ def should_continue(state: ExpertFinderState) -> Literal["tools", END]:
 # Create the tool node using LangGraph's prebuilt ToolNode
 # handle_tool_errors=True ensures that if a frontend tool is called
 # (which isn't in our tools list), it won't crash - just returns an error message
-tool_node = ToolNode(all_tools, handle_tool_errors=True)
+_base_tool_node = ToolNode(all_tools, handle_tool_errors=True)
+
+
+# Wrapper to fix null ID fields in tool responses
+async def tool_node(state: ExpertFinderState) -> dict:
+    """
+    Wrapper around the base tool node to fix None/null ID fields that cause
+    Zod validation errors in the frontend.
+    """
+    # Call the base tool node
+    result = await _base_tool_node.ainvoke(state)
+    
+    # Fix None/null id fields in messages
+    if "messages" in result:
+        for msg in result["messages"]:
+            # Fix None/null id field that causes Zod validation errors
+            if hasattr(msg, 'id') and msg.id is None:
+                msg.id = str(uuid.uuid4())
+    
+    return result
 
 
 # Build the StateGraph workflow

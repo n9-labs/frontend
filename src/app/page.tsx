@@ -143,18 +143,60 @@ function LandingPage({ onStartChat }: { onStartChat: (message: string) => void }
 }
 
 function ChatContent({ initialMessage }: { initialMessage: string }) {
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const lastErrorRef = useRef<string | null>(null);
+  
   // 🪁 Shared State: https://docs.copilotkit.ai/pydantic-ai/shared-state
-  useCoAgent({
+  const { state } = useCoAgent({
     name: "expert_finder_agent",
   });
 
   const { appendMessage, isLoading } = useCopilotChat();
-  const hasSubmittedRef = useRef(false);
+  const messageSent = useRef(false);
 
+  // Check for errors in agent state
+  useEffect(() => {
+    // Check if there's an error in the agent state
+    if (state && typeof state === "object" && "error" in state) {
+      const errorMsg = state.error as string;
+      // Only update if it's a new error
+      if (errorMsg && errorMsg !== lastErrorRef.current) {
+        lastErrorRef.current = errorMsg;
+        // Defer setState to avoid cascading renders
+        queueMicrotask(() => setAgentError(errorMsg));
+      }
+    }
+  }, [state]);
+  
+  // Listen for global error events from the agent
+  useEffect(() => {
+    const handleError = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      if (customEvent.detail?.error) {
+        const errorMsg = typeof customEvent.detail.error === "string" 
+          ? customEvent.detail.error 
+          : JSON.stringify(customEvent.detail.error);
+        
+        if (errorMsg !== lastErrorRef.current) {
+          lastErrorRef.current = errorMsg;
+          setAgentError(errorMsg);
+        }
+      }
+    };
+    
+    window.addEventListener("copilotkit:error", handleError);
+    window.addEventListener("agent:error", handleError);
+    
+    return () => {
+      window.removeEventListener("copilotkit:error", handleError);
+      window.removeEventListener("agent:error", handleError);
+    };
+  }, []);
+  
   // Send the initial message when the chat is ready
   // Using a ref instead of state to avoid re-renders and race conditions
   useEffect(() => {
-    if (!initialMessage || hasSubmittedRef.current) return;
+    if (!initialMessage || messageSent.current) return;
 
     // Retry until appendMessage succeeds - this handles the timing issue
     // where the chat might not be fully initialized yet
@@ -166,15 +208,15 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
             role: Role.User,
           })
         );
-        hasSubmittedRef.current = true;
-      } catch (error) {
+        messageSent.current = true;
+      } catch {
         // If it fails, retry after a short delay
         setTimeout(sendMessage, 200);
       }
     };
 
-    // Start trying to send once we have appendMessage and chat isn't loading
-    if (appendMessage && !isLoading) {
+    // Start trying to send once chat isn't loading
+    if (!isLoading) {
       sendMessage();
     }
   }, [initialMessage, appendMessage, isLoading]);
@@ -185,6 +227,12 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
       const isJiraTool = name.includes("jira_");
       
       if (isJiraTool) {
+        console.log('[JIRA TOOL RENDER]', {
+          name,
+          status,
+          args,
+          result,
+        });
         return (
           <div className="bg-gray-800/50 backdrop-blur-sm p-4 rounded-lg shadow-md my-2 border border-gray-700">
             <div className="flex items-center gap-2 mb-2">
@@ -192,11 +240,24 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
               <span className="font-semibold text-gray-100">{name.replace(/_/g, " ").replace("jira ", "JIRA: ")}</span>
             </div>
             
-            {args && (
+            {args && Object.keys(args).length > 0 && (
               <div className="text-sm text-gray-300 mb-2">
                 <span className="font-medium">Query:</span>
                 <div className="bg-gray-900/50 p-2 rounded mt-1 font-mono text-xs text-gray-400 break-all">
-                  {args.jql || args.issue_key || args.user_identifier || JSON.stringify(args)}
+                  {(() => {
+                    // Try specific known fields first
+                    if (args.jql) return args.jql;
+                    if (args.issue_key) return args.issue_key;
+                    if (args.user_identifier) return args.user_identifier;
+                    if (args.query) return args.query;
+                    if (args.topic) return args.topic;
+                    if (args.labels) return Array.isArray(args.labels) ? args.labels.join(", ") : args.labels;
+                    if (args.jira_key) return args.jira_key;
+                    
+                    // Fallback to JSON stringify
+                    const stringified = JSON.stringify(args);
+                    return stringified !== "{}" ? stringified : "";
+                  })()}
                 </div>
               </div>
             )}
@@ -208,13 +269,24 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
               </div>
             ) : (
               <div className="text-sm text-green-400 font-medium">
-                {result && typeof result === "string" && result.includes("total") ? (
-                  <>
-                    ✓ Found {JSON.parse(result).total || 0} issues ({JSON.parse(result).issues?.length || 0} returned)
-                  </>
-                ) : (
-                  <>✓ Complete</>
-                )}
+                {(() => {
+                  // Check if result was truncated
+                  if (result && typeof result === "string" && result.includes("[TRUNCATED")) {
+                    return <>✓ Complete (large result truncated)</>;
+                  }
+                  
+                  // Try to parse JSON result
+                  if (result && typeof result === "string" && result.includes("total")) {
+                    try {
+                      const parsed = JSON.parse(result);
+                      return <>✓ Found {parsed.total || 0} issues ({parsed.issues?.length || 0} returned)</>;
+                    } catch {
+                      return <>✓ Complete</>;
+                    }
+                  }
+                  
+                  return <>✓ Complete</>;
+                })()}
               </div>
             )}
           </div>
@@ -231,15 +303,38 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
   })
 
   return (
-    <div className="h-full">
-      <CopilotChat
-        labels={{
-          title: "Expert Finder",
-          placeholder: "Ask about any feature, team, or expert...",
-        }}
-        instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
-        className="h-full"
-      />
+    <div className="h-full flex flex-col">
+      {/* Error Banner */}
+      {agentError && (
+        <div className="bg-red-900/20 border border-red-500/50 text-red-200 px-4 py-3 mx-4 mt-4 rounded-lg flex items-start gap-3">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          </svg>
+          <div className="flex-1">
+            <h3 className="font-semibold mb-1">Agent Error</h3>
+            <p className="text-sm font-mono text-red-300 whitespace-pre-wrap break-words">
+              {agentError.length > 500 ? agentError.substring(0, 500) + "..." : agentError}
+            </p>
+            <button 
+              onClick={() => setAgentError(null)}
+              className="mt-2 text-xs text-red-400 hover:text-red-300 underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+      
+      <div className="flex-1">
+        <CopilotChat
+          labels={{
+            title: "Expert Finder",
+            placeholder: "Ask about any feature, team, or expert...",
+          }}
+          instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
+          className="h-full"
+        />
+      </div>
     </div>
   );
 }
