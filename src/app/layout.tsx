@@ -24,7 +24,7 @@ export default function RootLayout({
           // In E2E test mode, skip CopilotKit to avoid agent connection issues
           children
         ) : (
-          <CopilotKit runtimeUrl="/api/copilotkit" agent="expert_finder_agent" showDevConsole={false}>
+          <CopilotKit runtimeUrl="/api/copilotkit" agent="org_chat_agent" showDevConsole={false}>
             {children}
           </CopilotKit>
         )}

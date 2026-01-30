@@ -1,10 +1,10 @@
-# Expert Finder - Agent Documentation
+# Org Chat - Agent Documentation
 
 This document provides context for AI agents (Cursor, Copilot, etc.) working on this codebase.
 
 ## Project Overview
 
-**Expert Finder** is a Next.js application that helps users find subject matter experts within an organization by querying a Neo4j graph database of JIRA tickets. It uses CopilotKit for the chat UI and a LangGraph Python agent for intelligent querying.
+**Org Chat** is a Next.js application that helps users find subject matter experts within an organization by querying a Neo4j graph database of JIRA tickets. It uses CopilotKit for the chat UI and a LangGraph Python agent for intelligent querying.
 
 ## Architecture
 

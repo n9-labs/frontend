@@ -1,284 +1,108 @@
-# CopilotKit <> LangGraph Starter
+<p align="center">
+  <img src="public/logo.png" alt="Org Chat" width="400">
+</p>
 
-This is a starter template for building AI agents using [LangGraph](https://www.langchain.com/langgraph) and [CopilotKit](https://copilotkit.ai). It provides a modern Next.js application with an integrated LangGraph agent to be built on top of.
+# Org Chat
+
+Find subject matter experts in your organization by querying a knowledge graph of JIRA tickets. Have you ever needed help with something but didnt know who to ask? Rather than go on a goose chase, chat with this tool which uses ingested Jira data to make educated guesses to your questions about your coworkers.
 
 ## Prerequisites
 
-- Node.js 18+ 
-- Python 3.8+
-- Any of the following package managers:
-  - [pnpm](https://pnpm.io/installation) (recommended)
-  - npm
-  - [yarn](https://classic.yarnpkg.com/lang/en/docs/install/#mac-stable)
-  - [bun](https://bun.sh/)
-- OpenAI API Key (for the LangGraph agent)
+### For Docker Setup (Recommended)
 
-> **Note:** This repository ignores lock files (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb) to avoid conflicts between different package managers. Each developer should generate their own lock file using their preferred package manager. After that, make sure to delete it from the .gitignore.
-
-## Getting Started
-
-1. Install dependencies using your preferred package manager:
-```bash
-# Using pnpm (recommended)
-pnpm install
-
-# Using npm
-npm install
-
-# Using yarn
-yarn install
-
-# Using bun
-bun install
-```
-
-> **Note:** Installing the package dependencies will also install the agent's python dependencies via the `install:agent` script.
-
-
-2. Set up your environment variables:
-```bash
-touch .env
-```
-
-Your `.env` file should contain:
-```
-OPENAI_API_KEY=your-openai-api-key-here
-ANTHROPIC_API_KEY=your-anthropic-api-key-here
-MODEL=model-for-your-agent
-```
-
-3. Start the development server:
-```bash
-# Using pnpm
-pnpm dev
-
-# Using npm
-npm run dev
-
-# Using yarn
-yarn dev
-
-# Using bun
-bun run dev
-```
-
-This will start both the UI and agent servers concurrently.
-
-## Available Scripts
-The following scripts can also be run using your preferred package manager:
-- `dev` - Starts both UI and agent servers in development mode
-- `dev:debug` - Starts development servers with debug logging enabled
-- `dev:ui` - Starts only the Next.js UI server
-- `dev:agent` - Starts only the LangGraph agent server
-- `build` - Builds the Next.js application for production
-- `start` - Starts the production server
-- `lint` - Runs ESLint for code linting
-- `install:agent` - Installs Python dependencies for the agent
-
-### Testing Scripts
-- `test` - Run unit tests with Jest
-- `test:watch` - Run unit tests in watch mode
-- `test:coverage` - Run unit tests with coverage report
-- `test:e2e` - Run end-to-end tests with Playwright
-- `test:e2e:headed` - Run E2E tests with visible browser
-- `test:e2e:ui` - Open Playwright UI for interactive testing
-- `test:all` - Run both unit and E2E tests
-
-## Testing
-
-This project includes comprehensive testing to prevent regressions.
-
-### Test Structure
-
-```
-tests/
-├── unit/                    # Jest unit tests
-│   └── ChatContent.test.tsx # Tests for duplicate message prevention
-└── e2e/                     # Playwright E2E tests
-    ├── ui-flow.spec.ts      # Landing page, navigation, chat flow
-    ├── chat-alignment.spec.ts # Input alignment and styling
-    └── snapshots/           # Visual regression baselines
-```
-
-### Running Tests
-
-```bash
-# Install dev dependencies (includes test frameworks)
-npm install
-
-# Run unit tests
-npm run test
-
-# Run E2E tests (requires dev server running)
-npm run dev:ui &  # Start dev server in background
-npm run test:e2e
-
-# Run all tests
-npm run test:all
-```
-
-### Dependencies
-
-| Type | Installation | Use Case |
-|------|--------------|----------|
-| `dependencies` | `npm install --omit=dev` | Production runtime |
-| `devDependencies` | `npm install` | Development + testing |
-
-Test frameworks (Jest, Playwright) are in `devDependencies` and excluded from production builds.
-
-### CI/CD
-
-GitHub Actions runs on every push to `main`/`rag_connection` and on PRs:
-- **Lint**: ESLint checks
-- **Unit Tests**: Jest with coverage
-- **E2E Tests**: Playwright browser tests
-- **Build**: Production build verification
-
-See `.github/workflows/ci.yml` for the full workflow.
-
-## Quick Start with Docker Compose
-
-The fastest way to get running is with Docker Compose. This starts all services (UI, Agent, Neo4j) with a pre-populated database.
-
-### Prerequisites
-
-- [Docker](https://docs.docker.com/get-docker/) or [Podman](https://podman.io/getting-started/installation)
-- Docker Compose or Podman Compose
+- [Docker Desktop](https://docs.docker.com/get-docker/) or [Podman](https://podman.io/getting-started/installation)
+- Docker Compose (included with Docker Desktop)
+- **6GB+ RAM** allocated to Docker/Podman to enable next js with hot reload
 - An OpenAI or Anthropic API key
-- If using Podman, ensure your VM has at least 6GB of memory:
-  ```bash
-  podman machine stop
-  podman machine set --memory 6144
-  podman machine start
-  ```
+- Neo4j database files (ask a team member for the `neo4jdata` folder)
 
-### Step 1: Set Up Neo4j Data
+> **Podman users:** Ensure your VM has enough memory:
+> ```bash
+> podman machine stop && podman machine set --memory 6144 && podman machine start
+> ```
 
-The agent requires a pre-populated Neo4j database. Place the database files in `data/neo4jdata/`:
+### For Local Development
 
-```
-data/
-  neo4jdata/
-    databases/
-      neo4j/
-        ...
-      system/
-        ...
-    transactions/
-      ...
-```
+- Node.js 20+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
+- An OpenAI or Anthropic API key
 
-You can obtain the database files from:
-- Ask a team member for the `neo4jdata` folder
-- Or download from the shared drive (ask in Slack)
+## Quick Start
 
-### Step 2: Configure Environment
+### Setup
 
-Copy the example environment file and add your API key:
+1. **Get the database files** - Place Neo4j data in `data/neo4jdata/`
 
-```bash
-cp .env.example .env
-```
+2. **Configure environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your API key (OPENAI_API_KEY or ANTHROPIC_API_KEY)
+   ```
 
-Then edit `.env` and set your LLM API key:
+3. **Start services**
+   ```bash
+   docker compose up -d
+   ```
 
-```bash
-# Required: Set ONE of these
-OPENAI_API_KEY=your-openai-api-key
-# or
-ANTHROPIC_API_KEY=your-anthropic-api-key
-```
-
-See `.env.example` for all available configuration options.
-
-### Step 3: Start Services
-
-```bash
-# Using Docker
-docker compose up -d
-
-# Or with Podman
-podman compose up -d
-
-# View logs
-docker compose logs -f
-
-# Stop all services
-docker compose down
-```
+4. **Open the app** - http://localhost:3000
 
 ### Services
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| **UI** | http://localhost:3000 | Next.js frontend with CopilotKit |
-| **Agent** | http://localhost:8123 | LangGraph agent server |
-| **Neo4j Browser** | http://localhost:7474 | Graph database admin UI (no auth required) |
+| UI | http://localhost:3000 | Web interface |
+| Agent | http://localhost:8123 | LangGraph agent |
+| Neo4j | http://localhost:7474 | Database browser |
 
-### Verify It's Working
+### Commands
 
-1. Open http://localhost:7474 - You should see the Neo4j Browser
-2. Run this query to verify data: `MATCH (n:JiraDocument) RETURN count(n)`
-3. Open http://localhost:3000 - The UI should load
-4. Ask the agent: "Who should I talk to about llm-d?"
-
-### Development Workflow
-
-The compose setup includes volume mounts for hot-reloading:
-- UI: Changes to `src/` and `public/` are reflected immediately
-- Agent: Changes to `agent/` trigger automatic reloads
-
-To rebuild after dependency changes:
 ```bash
-docker compose up -d --build
+docker compose up -d      # Start all services
+docker compose logs -f    # View logs
+docker compose down       # Stop all services
+docker compose up --build # Rebuild after changes
 ```
 
-### Troubleshooting Docker Compose
+## Development
 
-**Neo4j fails to start:**
-- Ensure `data/neo4jdata` exists and contains the database files
-- Check that you're using Neo4j 2025 compatible data (the compose file uses `neo4j:2025`)
+For local development without Docker:
 
-**Agent can't connect to Neo4j:**
-- Verify Neo4j is running: `docker compose ps`
-- Check logs: `docker compose logs neo4j`
+```bash
+npm install           # Install dependencies
+npm run dev           # Start UI + agent
+```
 
-**UI shows connection errors:**
-- Wait for all services to fully start (can take 30-60 seconds)
-- Check agent logs: `docker compose logs agent`
+### Testing
 
-## Customization
+```bash
+npm run test          # Unit tests
+npm run test:e2e      # E2E tests
+npm run lint          # Linting
+```
 
-The main UI component is in `src/app/page.tsx`. You can:
-- Modify the theme colors and styling
-- Add new frontend actions
-- Customize the CopilotKit sidebar appearance
+## Architecture
+
+```mermaid
+flowchart LR
+    User([User]) --> UI[UI :3000]
+    UI --> Agent[Agent :8123]
+    Agent --> DB[(Neo4j :7687)]
+```
+
+| Component | Technology | Description |
+|-----------|------------|-------------|
+| **UI** | Next.js + CopilotKit | Chat interface |
+| **Agent** | LangGraph + Python | Rag tools |
+| **Neo4j** | Graph Database | JIRA tickets & relationships |
 
 ## Documentation
 
-- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/) - Learn more about LangGraph and its features
-- [CopilotKit Documentation](https://docs.copilotkit.ai) - Explore CopilotKit's capabilities
-- [Next.js Documentation](https://nextjs.org/docs) - Learn about Next.js features and API
-- [YFinance Documentation](https://pypi.org/project/yfinance/) - Financial data tools
-
-## Contributing
-
-Feel free to submit issues and enhancement requests! This starter is designed to be easily extensible.
+- [Configuration Guide](./docs/configuration.md) - Environment variables reference
+- [AGENTS.md](./AGENTS.md) - AI agent context for this codebase
+- [CopilotKit Docs](https://docs.copilotkit.ai)
+- [LangGraph Docs](https://langchain-ai.github.io/langgraph/)
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Troubleshooting
-
-### Agent Connection Issues
-If you see "I'm having trouble connecting to my tools", make sure:
-1. The LangGraph agent is running on port 8123
-2. Your OpenAI API key is set correctly in `.env`
-3. Both servers started successfully
-
-### Python Dependencies
-If you encounter Python import errors:
-```bash
-npm run install:agent
-```
+[MIT](./LICENSE)

@@ -14,10 +14,10 @@ const serviceAdapter = new ExperimentalEmptyAdapter();
 //    integration to setup the connection.
 const runtime = new CopilotRuntime({
   agents: {
-    expert_finder_agent: new LangGraphAgent({
+    org_chat_agent: new LangGraphAgent({
       deploymentUrl:
         process.env.LANGGRAPH_DEPLOYMENT_URL || "http://localhost:8123",
-      graphId: "expert_finder_agent",
+      graphId: "org_chat_agent",
       langsmithApiKey: process.env.LANGSMITH_API_KEY || "",
     }),
   },

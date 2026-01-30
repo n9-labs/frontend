@@ -1,5 +1,5 @@
 """
-Expert Finder Agent - Finds the right people to talk to about features
+Org Chat Agent - Finds the right people to talk to about features
 Uses RAG search and graph traversal to identify experts from JIRA data
 Integrates with Atlassian MCP server for real Jira/Confluence access
 
@@ -137,7 +137,7 @@ class Expert(BaseModel):
     linked_jiras: List[str]
 
 
-class ExpertFinderState(CopilotKitState):
+class OrgChatState(CopilotKitState):
     """
     LangGraph agent state schema extending CopilotKitState.
 
@@ -555,7 +555,7 @@ def list_jira_labels() -> str:
 
 
 # System prompt with role inference guidelines
-SYSTEM_PROMPT = """You are an expert finder for Red Hat AI. Your job is to help users 
+SYSTEM_PROMPT = """You are Org Chat, an assistant for Red Hat AI. Your job is to help users 
 find the right people to talk to about features, products, or technical questions.
 
 ## Available Tools
@@ -828,7 +828,7 @@ model_with_tools = model.bind_tools(all_tools)
 
 
 # Define the agent node that calls the LLM
-async def agent_node(state: ExpertFinderState) -> dict:
+async def agent_node(state: OrgChatState) -> dict:
     """
     The agent node that calls the LLM with the current messages and tools.
     The LLM decides whether to respond directly or call tools.
@@ -884,7 +884,7 @@ async def agent_node(state: ExpertFinderState) -> dict:
 
 
 # Define the conditional edge to determine next step
-def should_continue(state: ExpertFinderState) -> Literal["tools", END]:
+def should_continue(state: OrgChatState) -> Literal["tools", END]:
     """
     Determines whether to continue to tools or end the conversation.
 
@@ -911,7 +911,7 @@ _base_tool_node = ToolNode(all_tools, handle_tool_errors=True)
 
 
 # Wrapper to fix null ID fields in tool responses
-async def tool_node(state: ExpertFinderState) -> dict:
+async def tool_node(state: OrgChatState) -> dict:
     """
     Wrapper around the base tool node to fix None/null ID fields that cause
     Zod validation errors in the frontend.
@@ -930,7 +930,7 @@ async def tool_node(state: ExpertFinderState) -> dict:
 
 
 # Build the StateGraph workflow
-workflow = StateGraph(ExpertFinderState)
+workflow = StateGraph(OrgChatState)
 
 # Add nodes
 workflow.add_node("agent", agent_node)
