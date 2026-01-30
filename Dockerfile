@@ -22,5 +22,5 @@ COPY public ./public
 EXPOSE 3000
 
 # Dev server must bind to 0.0.0.0 inside containers.
-# Using webpack instead of turbopack for container compatibility.
-CMD ["pnpm", "exec", "next", "dev", "--webpack", "--hostname", "0.0.0.0", "--port", "3000"]
+# Using turbopack for faster builds and lower memory usage.
+CMD ["pnpm", "exec", "next", "dev", "--turbopack", "--hostname", "0.0.0.0", "--port", "3000"]

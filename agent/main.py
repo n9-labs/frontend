@@ -727,7 +727,17 @@ For each expert, format as follows with a BLANK LINE between each person:
 
 IMPORTANT: Always include a blank line between each expert entry for readability.
 
-Be concise but informative. If multiple people are relevant, rank them by expertise level."""
+Be concise but informative. If multiple people are relevant, rank them by expertise level.
+
+## CRITICAL: When to Stop
+
+DO NOT keep calling tools endlessly. Follow this rule:
+
+1. Call find_experts_by_topic ONCE with the main topic
+2. If you get results, STOP and synthesize your answer immediately
+3. Only call additional tools if the first search returned zero results
+4. Maximum 3 tool calls per query - then you MUST provide your best answer
+5. If you have ANY relevant experts, provide your answer - do not keep searching for "better" results"""
 
 
 # MCP server configuration for Atlassian tools

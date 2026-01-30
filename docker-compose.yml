@@ -14,6 +14,13 @@ services:
       - NEO4J_server_memory_heap_initial__size=256m
       - NEO4J_server_memory_heap_max__size=256m
       - NEO4J_server_memory_pagecache_size=256m
+    healthcheck:
+      # Check if Neo4j Bolt port is accepting connections
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     volumes:
       # Use local data directory with pre-populated Neo4j data
       - ./data/neo4jdata:/data
@@ -25,7 +32,8 @@ services:
     ports:
       - "8123:8123"
     depends_on:
-      - neo4j
+      neo4j:
+        condition: service_healthy
     # Optional: set Jira/Anthropic/etc env vars here or in your shell.
     # (We don't reference ./agent/.env directly because compose fails if it doesn't exist.)
     environment:
@@ -57,11 +65,11 @@ services:
     depends_on:
       - agent
     environment:
-      # Increase Node.js heap for webpack compilation (needs ~2GB for CopilotKit deps)
+      # Node.js heap size - turbopack uses less memory than webpack, can try reducing to 1024
       - NODE_OPTIONS=--max-old-space-size=2048
       # IMPORTANT: inside compose, "localhost" would be the ui container.
       - LANGGRAPH_DEPLOYMENT_URL=http://agent:8123
-      # Helps file watching in bind mounts on macOS/Windows
+      # Helps file watching in bind mounts on macOS/Windows (used by webpack, may not be needed for turbopack)
       - WATCHPACK_POLLING=true
     volumes:
       # Hot-reload UI source

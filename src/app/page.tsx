@@ -12,7 +12,7 @@ import {
 } from "@copilotkit/react-core";
 import { CopilotKitCSSProperties, CopilotChat } from "@copilotkit/react-ui";
 import { Role, TextMessage } from "@copilotkit/runtime-client-gql";
-import { useState, FormEvent, useEffect } from "react";
+import { useState, FormEvent, useEffect, useRef } from "react";
 
 export default function CopilotKitPage() {
   const [themeColor, setThemeColor] = useState("#6366f1");
@@ -55,22 +55,17 @@ export default function CopilotKitPage() {
       {!showChat ? (
         <LandingPage onStartChat={handleStartChat} />
       ) : (
-        <CopilotChat
-          labels={{
-            title: "Expert Finder",
-            initial: "👋 Ask me who to talk to about any feature, team, or expert in OpenShift AI!",
-          }}
-          instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
-          className="h-full copilotKitChat"
-          initialMessages={[
-            {
-              role: "user",
-              content: initialMessage,
-            }
-          ]}
-        >
+        <>
           <ChatContent themeColor={themeColor} initialMessage={initialMessage} />
-        </CopilotChat>
+          <CopilotChat
+            labels={{
+              title: "Expert Finder",
+              initial: "👋 Ask me who to talk to about any feature, team, or expert in OpenShift AI!",
+            }}
+            instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
+            className="h-full copilotKitChat"
+          />
+        </>
       )}
     </main>
   );
@@ -206,23 +201,36 @@ function ChatContent({ themeColor, initialMessage }: { themeColor: string; initi
     name: "expert_finder_agent",
   });
 
-  const { appendMessage } = useCopilotChat();
-  
-  // Auto-submit the initial message
+  const { appendMessage, isLoading } = useCopilotChat();
+  const hasSubmittedRef = useRef(false);
+
+  // Send the initial message when the chat is ready
+  // Using a ref instead of state to avoid re-renders and race conditions
   useEffect(() => {
-    if (initialMessage) {
-      const timer = setTimeout(() => {
-        appendMessage(
+    if (!initialMessage || hasSubmittedRef.current) return;
+
+    // Retry until appendMessage succeeds - this handles the timing issue
+    // where the chat might not be fully initialized yet
+    const sendMessage = async () => {
+      try {
+        await appendMessage(
           new TextMessage({
             content: initialMessage,
             role: Role.User,
           })
         );
-      }, 300);
-      return () => clearTimeout(timer);
+        hasSubmittedRef.current = true;
+      } catch (error) {
+        // If it fails, retry after a short delay
+        setTimeout(sendMessage, 200);
+      }
+    };
+
+    // Start trying to send once we have appendMessage and chat isn't loading
+    if (appendMessage && !isLoading) {
+      sendMessage();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialMessage, appendMessage, isLoading]);
 
   //🪁 Generative UI: https://docs.copilotkit.ai/pydantic-ai/generative-ui
   useRenderToolCall(
