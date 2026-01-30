@@ -4,11 +4,14 @@ import {
   useCoAgent,
   useDefaultTool,
   useCopilotChat,
+  useLangGraphInterrupt,
 } from "@copilotkit/react-core";
+
 import { CopilotKitCSSProperties, CopilotChat } from "@copilotkit/react-ui";
 import "@copilotkit/react-ui/styles.css";
 import { Role, TextMessage } from "@copilotkit/runtime-client-gql";
 import { useState, FormEvent, useEffect, useRef } from "react";
+import { FeedbackCard } from "@/components/feedback-card";
 
 // Check if we're in E2E test mode (CopilotKit is disabled)
 const isE2ETestMode = process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true";
@@ -213,10 +216,14 @@ function TestModeChatContent({ initialMessage, onBack }: { initialMessage: strin
 function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBack: () => void }) {
   const [agentError, setAgentError] = useState<string | null>(null);
   const lastErrorRef = useRef<string | null>(null);
+  
+  
   // 🪁 Shared State: https://docs.copilotkit.ai/pydantic-ai/shared-state
-  const { state } = useCoAgent({
-    name: "org_chat_agent",
+  const coAgent = useCoAgent({
+    name: "expert_finder_agent",
   });
+  
+  const { state } = coAgent;
 
   const { appendMessage, reset, isLoading } = useCopilotChat();
   const messageSent = useRef(false);
@@ -226,6 +233,70 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
     reset(); // Clear all messages and reset chat state
     onBack(); // Navigate back to landing page
   };
+
+  // Handle LangGraph interrupts for feedback - renders inline in message stream
+  useLangGraphInterrupt({
+    render: ({ event, resolve }) => {
+      // Debug: log all interrupt events
+      console.log("[INTERRUPT] Received interrupt event:", event);
+      console.log("[INTERRUPT] Event type:", typeof event);
+      console.log("[INTERRUPT] Event keys:", event ? Object.keys(event) : "null");
+      
+      // The event structure from LangGraph is:
+      // { name: 'LangGraphInterruptEvent', type: 'CUSTOM', value: { type: 'feedback_request', ... } }
+      // We need to check event.value.type, not event.type
+      if (event && typeof event === "object" && "value" in event) {
+        const value = event.value as Record<string, unknown>;
+        console.log("[INTERRUPT] Event value:", value);
+        console.log("[INTERRUPT] Value type:", value?.type);
+        
+        // Check if this is a feedback request
+        if (value && typeof value === "object" && value.type === "feedback_request") {
+          console.log("[INTERRUPT] ✅ Matched feedback_request, rendering card!");
+          
+          // Extract data from the interrupt value
+          const responseText = typeof value.response === "string" ? value.response : "";
+          const traceId = typeof value.traceId === "string" ? value.traceId : null;
+          
+          return (
+            <FeedbackCard 
+              onFeedback={async (feedback) => {
+                console.log("[HITL] User provided feedback:", feedback);
+                
+                // Log feedback to MLflow via API endpoint as backup
+                try {
+                  const response = await fetch("/api/log-feedback", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      feedback,
+                      score: feedback === "yes" ? 1 : 0,
+                      responseText: responseText.substring(0, 500),
+                      traceId,
+                    }),
+                  });
+                  
+                  if (!response.ok) {
+                    console.warn("[HITL] Failed to log feedback via API:", await response.text());
+                  }
+                } catch (error) {
+                  console.error("[HITL] Error logging feedback:", error);
+                }
+                
+                // Resolve the interrupt with the feedback value
+                // This sends the feedback back to the agent's feedback_node
+                resolve(JSON.stringify({ feedback }));
+              }}
+            />
+          );
+        }
+      }
+      
+      console.log("[INTERRUPT] ❌ Not a feedback request, skipping");
+      // Return empty fragment for non-feedback interrupts
+      return <></>;
+    }
+  });
 
   // Check for errors in agent state
   useEffect(() => {
@@ -303,17 +374,31 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
     render: ({ name, status, args, result }) => {
       const isJiraTool = name.includes("jira_");
       
+      // Check if the result contains an error
+      const isError = result && typeof result === "string" && (
+        result.includes("Error:") || 
+        result.includes("HTTPError:") ||
+        result.includes("HTTP error") ||
+        result.includes("does not exist for the field") ||
+        result.includes("Traceback") ||
+        result.toLowerCase().includes("failed")
+      );
+      
       if (isJiraTool) {
-        console.log('[JIRA TOOL RENDER]', {
-          name,
-          status,
-          args,
-          result,
-        });
         return (
-          <div className="bg-gray-800/50 backdrop-blur-sm p-4 rounded-lg shadow-md my-2 border border-gray-700">
+          <div className={`backdrop-blur-sm p-4 rounded-lg shadow-md my-2 border ${
+            isError 
+              ? "bg-red-900/20 border-red-500/50" 
+              : "bg-gray-800/50 border-gray-700"
+          }`}>
             <div className="flex items-center gap-2 mb-2">
-              <div className={`w-2 h-2 rounded-full ${status === "complete" ? "bg-green-500" : "bg-indigo-500 animate-pulse"}`} />
+              <div className={`w-2 h-2 rounded-full ${
+                status !== "complete" 
+                  ? "bg-indigo-500 animate-pulse" 
+                  : isError 
+                    ? "bg-red-500" 
+                    : "bg-green-500"
+              }`} />
               <span className="font-semibold text-gray-100">{name.replace(/_/g, " ").replace("jira ", "JIRA: ")}</span>
             </div>
             
@@ -343,6 +428,32 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
               <div className="flex items-center gap-2 text-sm text-indigo-400">
                 <div className="animate-spin h-3 w-3 border-2 border-indigo-400 border-t-transparent rounded-full" />
                 <span>Searching JIRA...</span>
+              </div>
+            ) : isError ? (
+              <div className="text-sm">
+                <div className="text-red-400 font-medium mb-1">✗ Error</div>
+                <div className="text-red-300 text-xs bg-red-950/30 p-2 rounded font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
+                  {(() => {
+                    // Extract just the error message, not the full traceback
+                    const resultStr = result as string;
+                    const lines = resultStr.split('\n');
+                    
+                    // Look for the actual error message
+                    const errorLine = lines.find(line => 
+                      line.includes('Error:') || 
+                      line.includes('HTTPError:') ||
+                      line.includes('does not exist')
+                    );
+                    
+                    if (errorLine) {
+                      // Clean up the error message
+                      return errorLine.replace(/^Error:\s*/, '').trim();
+                    }
+                    
+                    // Fallback to showing first 200 chars of result
+                    return resultStr.substring(0, 200) + (resultStr.length > 200 ? '...' : '');
+                  })()}
+                </div>
               </div>
             ) : (
               <div className="text-sm text-green-400 font-medium">
@@ -449,7 +560,7 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
           </div>
         </div>
       )}
-      
+
       {/* Chat Area */}
       <div className="flex-1 min-h-0">
         <CopilotChat

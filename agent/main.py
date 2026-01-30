@@ -5,22 +5,30 @@ Integrates with Atlassian MCP server for real Jira/Confluence access
 
 Built using LangGraph Graph API (StateGraph) for explicit control over
 the agent workflow, nodes, and edges.
+
+Includes MLflow tracing for observability and prompt registry for
+version-controlled system prompts.
 """
 
 import asyncio
 import uuid
+import logging
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings  # type: ignore
 from langchain.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import Connection
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint.memory import MemorySaver
 from copilotkit import CopilotKitState
 from copilotkit.langgraph import copilotkit_customize_config
+
+# MLflow imports for tracing and prompt registry
+import mlflow
+import mlflow.langchain
 
 
 class Settings(BaseSettings):
@@ -34,6 +42,22 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
     api_key: str = Field(default="")
+
+    # MLflow configuration
+    # Note: macOS uses port 5000 for AirPlay Receiver, so we use 5001 by default
+    mlflow_tracking_uri: str = Field(
+        default="http://localhost:5001", validation_alias="MLFLOW_TRACKING_URI"
+    )
+    mlflow_experiment_name: str = Field(
+        default="expert-finder-agent", validation_alias="MLFLOW_EXPERIMENT_NAME"
+    )
+    mlflow_enabled: bool = Field(default=True, validation_alias="MLFLOW_ENABLED")
+    mlflow_prompt_name: str = Field(
+        default="expert-finder-system-prompt", validation_alias="MLFLOW_PROMPT_NAME"
+    )
+    mlflow_prompt_alias: str = Field(
+        default="production", validation_alias="MLFLOW_PROMPT_ALIAS"
+    )
 
     # Agent/model
     model: str = Field(default="claude-sonnet-4-5", validation_alias="N9_AGENT_MODEL")
@@ -81,6 +105,62 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+# ---------------------------------------------------------------------------
+# MLflow Tracing Initialization (runs at module load)
+# ---------------------------------------------------------------------------
+
+_mlflow_initialized = False
+
+
+def init_mlflow_tracing():
+    """
+    Initialize MLflow tracing for LangChain/LangGraph.
+    
+    This sets up:
+    1. MLflow tracking URI for trace storage
+    2. Experiment name for organizing traces
+    3. LangChain autolog for automatic tracing of all LLM calls
+    
+    Note: Prompt loading is done separately via get_system_prompt() 
+    after DEFAULT_SYSTEM_PROMPT is defined.
+    """
+    global _mlflow_initialized
+    
+    if _mlflow_initialized:
+        return
+    
+    if not settings.mlflow_enabled:
+        print("[INFO] MLflow tracing is disabled (MLFLOW_ENABLED=false)")
+        _mlflow_initialized = True
+        return
+    
+    try:
+        # Configure MLflow tracking
+        mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+        mlflow.set_experiment(settings.mlflow_experiment_name)
+        
+        # Enable autolog for automatic LangGraph tracing
+        # This creates one trace per graph execution with all nodes as spans
+        # Note: OpenTelemetry warnings are suppressed via logging config at module top
+        mlflow.langchain.autolog(run_tracer_inline=True, silent=True)
+        
+        print(f"[OK] MLflow tracing enabled:")
+        print(f"     Tracking URI: {settings.mlflow_tracking_uri}")
+        print(f"     Experiment: {settings.mlflow_experiment_name}")
+        print(f"     Tracing: langchain.autolog() (warnings suppressed)")
+        
+        _mlflow_initialized = True
+        
+    except Exception as e:
+        print(f"[WARN] Failed to initialize MLflow tracing: {e}")
+        print("[INFO] Continuing without MLflow tracing")
+        _mlflow_initialized = True
+
+
+# Initialize MLflow tracing at module load (before prompt is defined)
+init_mlflow_tracing()
 
 
 # Neo4j driver (lazy initialization)
@@ -137,7 +217,7 @@ class Expert(BaseModel):
     linked_jiras: List[str]
 
 
-class OrgChatState(CopilotKitState):
+class ExpertFinderState(CopilotKitState):
     """
     LangGraph agent state schema extending CopilotKitState.
 
@@ -554,8 +634,8 @@ def list_jira_labels() -> str:
         return f"Error listing labels: {e}"
 
 
-# System prompt with role inference guidelines
-SYSTEM_PROMPT = """You are Org Chat, an assistant for Red Hat AI. Your job is to help users 
+# Default system prompt with role inference guidelines (fallback if MLflow unavailable)
+DEFAULT_SYSTEM_PROMPT = """You are an expert finder for Red Hat AI. Your job is to help users 
 find the right people to talk to about features, products, or technical questions.
 
 ## Available Tools
@@ -662,7 +742,55 @@ DO NOT keep calling tools endlessly. Follow this rule:
 2. If you get results, STOP and synthesize your answer immediately
 3. Only call additional tools if the first search returned zero results
 4. Maximum 3 tool calls per query - then you MUST provide your best answer
-5. If you have ANY relevant experts, provide your answer - do not keep searching for "better" results"""
+5. If you have ANY relevant experts, provide your answer - do not keep searching for "better" results
+
+## Collecting Feedback
+
+After providing your complete answer, you can optionally call the `request_feedback` tool to collect
+user satisfaction data. This helps improve the system over time.
+
+Example:
+- Provide your expert recommendations
+- Then call: request_feedback(response_text="summary of what you told them", question="Was this helpful?")
+- The user will see a feedback card and can rate your response"""
+
+
+def _load_prompt_from_mlflow() -> str:
+    """
+    Load the system prompt from MLflow Prompt Registry.
+    
+    IMPORTANT: This must be called at MODULE INITIALIZATION TIME, not inside
+    async functions. The MLflow SDK uses synchronous HTTP calls which will be
+    blocked by LangGraph's async runtime if called inside agent nodes.
+    
+    Returns:
+        The system prompt string from MLflow, or the default if unavailable.
+    """
+    if not settings.mlflow_enabled:
+        print("[INFO] MLflow prompt registry disabled (MLFLOW_ENABLED=false)")
+        return DEFAULT_SYSTEM_PROMPT
+
+    try:
+        # Try to load from MLflow prompt registry (MLflow 3.x API)
+        # Format for alias: "prompts:/<prompt_name>@<alias>"
+        prompt_uri = f"prompts:/{settings.mlflow_prompt_name}@{settings.mlflow_prompt_alias}"
+        prompt = mlflow.genai.load_prompt(prompt_uri)
+        print(f"[OK] Loaded system prompt from MLflow: {prompt_uri}")
+        return prompt.template
+    except Exception as e:
+        print(f"[WARN] Could not load prompt from MLflow: {e}")
+        print("[INFO] Using default system prompt - run 'python register_prompt.py' to register it in MLflow")
+        return DEFAULT_SYSTEM_PROMPT
+
+
+# EAGER LOAD: Load the system prompt at module initialization time
+# This avoids blocking calls inside async agent nodes
+SYSTEM_PROMPT = _load_prompt_from_mlflow()
+
+
+def load_system_prompt() -> str:
+    """Get the cached system prompt (already loaded at module init)."""
+    return SYSTEM_PROMPT
 
 
 # MCP server configuration for Atlassian tools
@@ -827,18 +955,22 @@ model = get_model()
 model_with_tools = model.bind_tools(all_tools)
 
 
-# Define the agent node that calls the LLM
-async def agent_node(state: OrgChatState) -> dict:
+# Define the agent node that calls the LLM  
+async def agent_node(state: ExpertFinderState, config: RunnableConfig = None) -> dict:
     """
     The agent node that calls the LLM with the current messages and tools.
     The LLM decides whether to respond directly or call tools.
+    
+    Traced automatically by autolog as a span within the graph execution trace.
     """
     try:
         messages = state.get("messages", [])
+        print(f"[AGENT_NODE] Processing {len(messages)} input messages")
         
         # Add system prompt if not already present
+        # Use load_system_prompt() for lazy loading from MLflow registry
         if not messages or not isinstance(messages[0], SystemMessage):
-            messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
+            messages = [SystemMessage(content=load_system_prompt())] + list(messages)
         
         # Trim oversized tool responses in existing messages
         for msg in messages:
@@ -863,11 +995,50 @@ async def agent_node(state: OrgChatState) -> dict:
         # Call the LLM
         response = await model_to_use.ainvoke(messages)
         
+        # Log message details for debugging
+        print(f"[AGENT_NODE] LLM response: type={type(response).__name__}, has_id={hasattr(response, 'id')}, id={getattr(response, 'id', 'NO_ATTR')}")
+        if hasattr(response, 'additional_kwargs'):
+            print(f"[AGENT_NODE] additional_kwargs keys: {list(response.additional_kwargs.keys())}")
+            if 'parentMessageId' in response.additional_kwargs:
+                print(f"[AGENT_NODE] parentMessageId in additional_kwargs: {response.additional_kwargs['parentMessageId']}")
+        
+        # Ensure response has an ID
+        if hasattr(response, 'id') and response.id is None:
+            response.id = str(uuid.uuid4())
+            print(f"[AGENT_NODE] Fixed null ID on response, set to {response.id}")
+        
+        # Check for parentMessageId as direct attribute
+        if hasattr(response, 'parentMessageId'):
+            print(f"[AGENT_NODE] Response has parentMessageId attribute: {response.parentMessageId}")
+            if response.parentMessageId is None:
+                print(f"[AGENT_NODE] WARNING: Response has null parentMessageId attribute - REMOVING")
+                try:
+                    del response.parentMessageId
+                except:
+                    pass
+        
+        # Fix parentMessageId if it's null in additional_kwargs
+        if hasattr(response, 'additional_kwargs'):
+            if 'parentMessageId' in response.additional_kwargs:
+                if response.additional_kwargs['parentMessageId'] is None:
+                    print(f"[AGENT_NODE] WARNING: Removing null parentMessageId from response additional_kwargs")
+                    del response.additional_kwargs['parentMessageId']
+        
+        # Check serialized output
+        try:
+            if hasattr(response, 'dict'):
+                serialized = response.dict()
+                if 'parentMessageId' in serialized and serialized['parentMessageId'] is None:
+                    print(f"[AGENT_NODE] CRITICAL: Serialized response has null parentMessageId!")
+        except Exception as e:
+            pass
+        
         return {"messages": [response]}
     except Exception as e:
         # Capture error and add it to state for frontend display
         error_msg = f"Agent error: {type(e).__name__}: {str(e)}"
         print(f"[ERROR] {error_msg}")
+        # print(f"[ERROR] Full traceback:", exc_info=True)
         
         # Create an error message that will be displayed to the user
         # Generate a proper ID to avoid null/None issues with CopilotKit's Zod validation
@@ -875,6 +1046,8 @@ async def agent_node(state: OrgChatState) -> dict:
             content=f"⚠️ **An error occurred while processing your request:**\n\n```\n{error_msg}\n```",
             id=str(uuid.uuid4())  # Ensure id is a string, not None
         )
+        
+        print(f"[ERROR] Created error response: id={error_response.id}, type={type(error_response).__name__}")
         
         # Return error state - store error in state for frontend access
         return {
@@ -884,24 +1057,165 @@ async def agent_node(state: OrgChatState) -> dict:
 
 
 # Define the conditional edge to determine next step
-def should_continue(state: OrgChatState) -> Literal["tools", END]:
+def should_continue(state: ExpertFinderState) -> Literal["tools", "feedback", END]:
     """
-    Determines whether to continue to tools or end the conversation.
+    Determines whether to continue to tools, feedback, or end the conversation.
 
     If the last message has tool calls, route to tools node.
+    If the agent finished responding, route to feedback node for human-in-the-loop.
     Otherwise, end the conversation.
     """
     messages = state.get("messages", [])
+    print(f"[ROUTING] should_continue called with {len(messages)} messages")
+    
     if not messages:
+        print("[ROUTING] No messages, returning END")
         return END
 
     last_message = messages[-1]
-
+    print(f"[ROUTING] Last message type: {type(last_message).__name__}")
+    
     # Check if the last message is an AI message with tool calls
-    if isinstance(last_message, AIMessage) and last_message.tool_calls:
-        return "tools"
-
+    if isinstance(last_message, AIMessage):
+        has_tool_calls = bool(last_message.tool_calls)
+        print(f"[ROUTING] AIMessage - has_tool_calls: {has_tool_calls}")
+        
+        if has_tool_calls:
+            print("[ROUTING] → Routing to 'tools'")
+            return "tools"
+        else:
+            print("[ROUTING] → Routing to 'feedback'")
+            return "feedback"
+    
+    print(f"[ROUTING] → Returning END (message type: {type(last_message).__name__})")
     return END
+
+
+# Define the feedback collection node using interrupt()
+async def feedback_node(state: ExpertFinderState, config: RunnableConfig = None) -> dict:
+    """
+    Feedback collection node that calls interrupt() to pause execution.
+    
+    The interrupt() call emits an on_interrupt event that CopilotKit can detect.
+    When resumed, the feedback is provided and logged to MLflow.
+    
+    Traced automatically by autolog as a span within the graph execution trace.
+    """
+    from langgraph.types import interrupt
+    
+    # Extract thread_id for session tracking (used for MLflow trace scoring)
+    thread_id = None
+    if config:
+        configurable = config.get("configurable", {})
+        thread_id = configurable.get("thread_id") if configurable else None
+    
+    print("\n\n")
+    print("=" * 80)
+    print("[FEEDBACK] FEEDBACK NODE ENTERED!!!")
+    print("=" * 80)
+    print("\n")
+    
+    messages = state.get("messages", [])
+    print(f"[FEEDBACK] State has {len(messages)} messages")
+    
+    # Find the last AI message (the response to rate)
+    last_ai_message = None
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage) and not msg.tool_calls:
+            last_ai_message = msg
+            break
+    
+    if not last_ai_message:
+        print("[FEEDBACK] No AI message to rate, skipping")
+        return {}
+    
+    response_text = last_ai_message.content if isinstance(last_ai_message.content, str) else str(last_ai_message.content)
+    
+    # Get the active trace ID to include in the interrupt event
+    trace_id = None
+    if settings.mlflow_enabled:
+        try:
+            active_trace = mlflow.last_active_trace()
+            if active_trace:
+                trace_id = active_trace.info.request_id
+        except Exception as e:
+            print(f"[FEEDBACK] Could not get trace ID: {e}")
+    
+    print(f"[FEEDBACK] ===== CALLING INTERRUPT() =====")
+    print(f"[FEEDBACK] Response to rate: {len(response_text)} chars")
+    print(f"[FEEDBACK] Trace ID: {trace_id}")
+    
+    # Call interrupt() - this should pause and emit on_interrupt event
+    # Include trace ID so frontend can log feedback via API
+    feedback_data = interrupt(
+        {
+            "type": "feedback_request",
+            "question": "Was this response helpful?",
+            "options": ["yes", "no"],
+            "response": response_text[:500],  # First 500 chars
+            "traceId": trace_id,  # Include trace ID for frontend logging
+        }
+    )
+    
+    print(f"[FEEDBACK] ===== INTERRUPT RETURNED =====")
+    print(f"[FEEDBACK] Feedback data: {feedback_data}")
+    print(f"[FEEDBACK] Feedback type: {type(feedback_data)}")
+    
+    # Extract feedback from the resume data
+    # Frontend sends JSON string: {"feedback": "yes"} or {"feedback": "no"}
+    feedback = None
+    if feedback_data:
+        if isinstance(feedback_data, dict):
+            feedback = feedback_data.get("feedback", "")
+        elif isinstance(feedback_data, str):
+            # Try parsing as JSON first
+            try:
+                import json
+                parsed = json.loads(feedback_data)
+                feedback = parsed.get("feedback", "")
+            except:
+                # Fallback to string matching
+                feedback = "yes" if "yes" in feedback_data.lower() else "no"
+    
+    print(f"[FEEDBACK] Extracted feedback: {feedback}")
+    
+    if not feedback:
+        print("[FEEDBACK] No feedback received")
+        return {}
+    
+    # Score the trace with feedback
+    score = 1 if feedback == "yes" else 0
+    print(f"[FEEDBACK] Scoring trace: {feedback} (score: {score})")
+    
+    if settings.mlflow_enabled:
+        try:
+            # Get the active trace (should be the parent thread execution trace)
+            active_trace_id = mlflow.get_last_active_trace_id()
+            
+            if active_trace_id is not None:
+                trace_id = active_trace_id
+                
+                # Use the proper MLflow feedback API
+                from mlflow.entities import AssessmentSource, AssessmentSourceType
+                
+                mlflow.log_feedback(
+                    trace_id=trace_id,
+                    name="user_satisfaction",
+                    value=(feedback == "yes"),  # Boolean value
+                    rationale=f"User indicated response was {'helpful' if feedback == 'yes' else 'not helpful'}",
+                    source=AssessmentSource(
+                        source_type=AssessmentSourceType.HUMAN,
+                        source_id="agent_feedback_node"
+                    )
+                )
+                
+                print(f"[OK] Feedback logged for trace: {trace_id} (value: {feedback})")
+            else:
+                print("[WARN] No active trace to score")
+        except Exception as e:
+            print(f"[WARN] MLflow feedback logging failed: {e}")
+    
+    return {}
 
 
 # Create the tool node using LangGraph's prebuilt ToolNode
@@ -910,31 +1224,114 @@ def should_continue(state: OrgChatState) -> Literal["tools", END]:
 _base_tool_node = ToolNode(all_tools, handle_tool_errors=True)
 
 
-# Wrapper to fix null ID fields in tool responses
-async def tool_node(state: OrgChatState) -> dict:
+# Wrapper to fix null ID fields in tool responses and mark errors
+async def tool_node(state: ExpertFinderState, config: RunnableConfig = None) -> dict:
     """
     Wrapper around the base tool node to fix None/null ID fields that cause
-    Zod validation errors in the frontend.
+    Zod validation errors in the frontend, and mark tool errors explicitly.
+    
+    Traced automatically by autolog as a span within the graph execution trace.
     """
+    print(f"[TOOL_NODE] Starting tool execution")
+    
     # Call the base tool node
     result = await _base_tool_node.ainvoke(state)
     
-    # Fix None/null id fields in messages
+    print(f"[TOOL_NODE] Tool execution complete, processing {len(result.get('messages', []))} messages")
+    
+    # Fix None/null id fields and mark errors in messages
     if "messages" in result:
-        for msg in result["messages"]:
+        for i, msg in enumerate(result["messages"]):
+            print(f"[TOOL_NODE] Message {i}: type={type(msg).__name__}, has_id={hasattr(msg, 'id')}, id={getattr(msg, 'id', 'NO_ATTR')}")
+            
+            # Dump full message structure for debugging
+            if hasattr(msg, '__dict__'):
+                print(f"[TOOL_NODE] Message {i} full dict keys: {list(msg.__dict__.keys())}")
+                # Check ALL message attributes for null values
+                for attr, value in msg.__dict__.items():
+                    if value is None:
+                        print(f"[TOOL_NODE] WARNING: Message {i}.{attr} = None")
+            
             # Fix None/null id field that causes Zod validation errors
             if hasattr(msg, 'id') and msg.id is None:
-                msg.id = str(uuid.uuid4())
+                new_id = str(uuid.uuid4())
+                msg.id = new_id
+                print(f"[TOOL_NODE] Fixed null ID on message {i}, set to {new_id}")
+            
+            # Check for parent_id / parentMessageId as direct attributes
+            # Note: We can't safely delete these if Zod schema requires them
+            # So we try to set them to a valid value instead
+            if hasattr(msg, 'parent_id'):
+                if msg.parent_id is None:
+                    print(f"[TOOL_NODE] WARNING: Message {i} has null parent_id")
+                    # Try to set to empty string or find the previous message's ID
+                    try:
+                        del msg.parent_id
+                    except:
+                        pass
+            
+            if hasattr(msg, 'parentMessageId'):
+                if msg.parentMessageId is None:
+                    print(f"[TOOL_NODE] WARNING: Message {i} has null parentMessageId")
+                    # Try to delete it
+                    try:
+                        del msg.parentMessageId
+                    except:
+                        pass
+            
+            # Check additional_kwargs for parentMessageId
+            if hasattr(msg, 'additional_kwargs'):
+                print(f"[TOOL_NODE] Message {i} additional_kwargs keys: {list(msg.additional_kwargs.keys())}")
+                if 'parentMessageId' in msg.additional_kwargs:
+                    print(f"[TOOL_NODE] Message {i} parentMessageId value: {msg.additional_kwargs['parentMessageId']}")
+                    if msg.additional_kwargs['parentMessageId'] is None:
+                        print(f"[TOOL_NODE] WARNING: Message {i} has null parentMessageId in additional_kwargs - REMOVING")
+                        del msg.additional_kwargs['parentMessageId']
+            
+            # Try to serialize the message to see what CopilotKit will receive
+            try:
+                if hasattr(msg, 'dict'):
+                    serialized = msg.dict()
+                    print(f"[TOOL_NODE] Message {i} serialized keys: {list(serialized.keys())}")
+                    if 'parentMessageId' in serialized:
+                        print(f"[TOOL_NODE] Message {i} serialized parentMessageId: {serialized['parentMessageId']}")
+                        # This is the problem - if it's in the serialized output, we need to fix the source
+            except Exception as e:
+                print(f"[TOOL_NODE] Could not serialize message {i}: {e}")
+            
+            # Mark tool errors explicitly in ToolMessage metadata
+            # LangGraph's handle_tool_errors returns errors as ToolMessages with error text
+            if hasattr(msg, 'content') and isinstance(msg.content, str):
+                is_error = (
+                    "Error:" in msg.content or
+                    "HTTPError:" in msg.content or
+                    "HTTP error" in msg.content or
+                    "Traceback" in msg.content or
+                    "does not exist for the field" in msg.content or
+                    msg.content.lower().startswith("error")
+                )
+                
+                if is_error:
+                    print(f"[TOOL_NODE] Message {i} contains error")
+                
+                # Add error flag to additional_kwargs for frontend access
+                if is_error and hasattr(msg, 'additional_kwargs'):
+                    msg.additional_kwargs['error'] = True
+                elif is_error:
+                    # Create additional_kwargs if it doesn't exist
+                    msg.additional_kwargs = {'error': True}
     
+    print(f"[TOOL_NODE] Returning result with {len(result.get('messages', []))} messages")
     return result
 
 
 # Build the StateGraph workflow
-workflow = StateGraph(OrgChatState)
+workflow = StateGraph(ExpertFinderState)
 
 # Add nodes
 workflow.add_node("agent", agent_node)
 workflow.add_node("tools", tool_node)
+workflow.add_node("feedback", feedback_node)
 
 # Add edges
 workflow.add_edge(START, "agent")  # Start with the agent
@@ -943,12 +1340,17 @@ workflow.add_conditional_edges(
     should_continue,
     {
         "tools": "tools",
+        "feedback": "feedback",
         END: END,
     },
 )
 workflow.add_edge("tools", "agent")  # After tools, go back to agent
+workflow.add_edge("feedback", END)  # After feedback, end
 
-# Compile the graph with memory for persistence
-# memory = MemorySaver()
-# graph = workflow.compile(checkpointer=memory)
+# Compile the graph WITH interrupt_before on the feedback node
+# This tells LangGraph to pause before executing the feedback node and emit the interrupt event
+# CopilotKit will detect this and trigger the useLangGraphInterrupt hook in the frontend
 graph = workflow.compile()
+
+# autolog() automatically traces the entire graph execution as one trace,
+# with all node executions captured as spans within that trace
