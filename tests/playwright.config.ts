@@ -29,14 +29,17 @@ export default defineConfig({
     },
   ],
   // Web server configuration
-  // CI: starts the production server after build (reuses if already running)
-  // Local: assumes dev server is already running (start with `npm run dev` first)
-  webServer: process.env.CI
-    ? {
-        command: "npm run start",
-        url: "http://localhost:3000",
-        reuseExistingServer: true,
-        timeout: 120000,
-      }
-    : undefined,
+  // CI: uses production build (npm run start) - requires prior npm run build
+  // Local: uses dev server (npm run dev) - hot reload, no build required
+  // 
+  // IMPORTANT: For E2E tests, set NEXT_PUBLIC_E2E_TEST_MODE=true at BUILD time
+  // to disable CopilotKit's agent connection (which requires a real backend)
+  // In CI, this is done in the workflow: NEXT_PUBLIC_E2E_TEST_MODE=true npm run build
+  // Locally: NEXT_PUBLIC_E2E_TEST_MODE=true npm run dev
+  webServer: {
+    command: process.env.CI ? "npm run start" : "NEXT_PUBLIC_E2E_TEST_MODE=true npm run dev",
+    url: "http://localhost:3000",
+    reuseExistingServer: true,
+    timeout: 120000,
+  },
 });
