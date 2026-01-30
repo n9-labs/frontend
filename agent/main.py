@@ -1084,6 +1084,17 @@ def should_continue(state: ExpertFinderState) -> Literal["tools", "feedback", EN
             print("[ROUTING] → Routing to 'tools'")
             return "tools"
         else:
+            # Check if there's an error - route errors directly to END
+            if state.get("error"):
+                print("[ROUTING] → Error detected in state, routing to END")
+                return END
+            
+            # Check if the message content contains an error marker
+            message_content = last_message.content if isinstance(last_message.content, str) else str(last_message.content)
+            if "⚠️ **An error occurred" in message_content or "Agent error:" in message_content:
+                print("[ROUTING] → Error message detected in content, routing to END")
+                return END
+            
             print("[ROUTING] → Routing to 'feedback'")
             return "feedback"
     
@@ -1118,6 +1129,11 @@ async def feedback_node(state: ExpertFinderState, config: RunnableConfig = None)
     messages = state.get("messages", [])
     print(f"[FEEDBACK] State has {len(messages)} messages")
     
+    # Check if there's an error in the state - don't request feedback for errors
+    if state.get("error"):
+        print("[FEEDBACK] Error detected in state, skipping feedback request")
+        return {}
+    
     # Find the last AI message (the response to rate)
     last_ai_message = None
     for msg in reversed(messages):
@@ -1130,6 +1146,11 @@ async def feedback_node(state: ExpertFinderState, config: RunnableConfig = None)
         return {}
     
     response_text = last_ai_message.content if isinstance(last_ai_message.content, str) else str(last_ai_message.content)
+    
+    # Also check if the message content indicates an error
+    if "⚠️ **An error occurred" in response_text or "Agent error:" in response_text:
+        print("[FEEDBACK] Error message detected, skipping feedback request")
+        return {}
     
     # Get the active trace ID to include in the interrupt event
     trace_id = None
