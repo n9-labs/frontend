@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+/playwright/.cache/
 
 # next.js
 /.next/
@@ -42,14 +45,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# lock files
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-bun.lockb
+# Note: package-lock.json is committed for reproducible CI builds
 
 # LangGraph API
 .langgraph_api
 
 # Local Neo4j data (keep data/ but ignore the database files)
 data/neo4jdata/
+data/neo4jdata_backup/

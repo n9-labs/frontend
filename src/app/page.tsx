@@ -10,6 +10,9 @@ import "@copilotkit/react-ui/styles.css";
 import { Role, TextMessage } from "@copilotkit/runtime-client-gql";
 import { useState, FormEvent, useEffect, useRef } from "react";
 
+// Check if we're in E2E test mode (CopilotKit is disabled)
+const isE2ETestMode = process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true";
+
 export default function CopilotKitPage() {
   const [showChat, setShowChat] = useState(false);
   const [initialMessage, setInitialMessage] = useState("");
@@ -17,6 +20,10 @@ export default function CopilotKitPage() {
   const handleStartChat = (message: string) => {
     setInitialMessage(message);
     setShowChat(true);
+  };
+
+  const handleBackToHome = () => {
+    setShowChat(false);
   };
 
   const customStyles = {
@@ -33,10 +40,16 @@ export default function CopilotKitPage() {
     <main style={customStyles} className="h-screen bg-gray-900">
       {!showChat ? (
         <LandingPage onStartChat={handleStartChat} />
+      ) : isE2ETestMode ? (
+        // In E2E test mode, show a simplified chat UI without CopilotKit
+        <TestModeChatContent 
+          initialMessage={initialMessage} 
+          onBack={handleBackToHome} 
+        />
       ) : (
         <ChatContent 
           initialMessage={initialMessage} 
-          onBack={() => setShowChat(false)} 
+          onBack={handleBackToHome}
         />
       )}
     </main>
@@ -145,6 +158,63 @@ function LandingPage({ onStartChat }: { onStartChat: (message: string) => void }
   );
 }
 
+/**
+ * Simplified chat UI for E2E testing
+ * This component mirrors the real ChatContent layout but doesn't use CopilotKit hooks
+ */
+function TestModeChatContent({ initialMessage, onBack }: { initialMessage: string; onBack: () => void }) {
+  return (
+    <div className="h-full flex flex-col">
+      {/* Navigation Header */}
+      <div className="px-6 py-4 shrink-0 bg-gradient-to-b from-gray-900/80 to-transparent">
+        <button
+          onClick={onBack}
+          className="group flex items-center gap-2 text-gray-500 hover:text-gray-200 transition-all duration-200"
+        >
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            className="h-4 w-4 group-hover:-translate-x-0.5 transition-transform" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          <span className="text-sm font-medium">Back</span>
+        </button>
+      </div>
+
+      {/* Chat Area - Simplified for testing */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        {/* Messages Container */}
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="copilotKitMessage bg-gray-800 rounded-lg p-4 mb-4">
+            <p className="text-gray-200">{initialMessage}</p>
+          </div>
+          <div className="bg-gray-700 rounded-lg p-4">
+            <p className="text-gray-300">[E2E Test Mode] Agent responses are disabled.</p>
+          </div>
+        </div>
+        
+        {/* Input Area - Matches CopilotKit structure */}
+        <div className="copilotKitInput flex items-center p-4 border-t border-gray-700">
+          <textarea
+            placeholder="Type a message..."
+            className="flex-1 bg-gray-800 text-white rounded-lg p-3 resize-none border border-gray-600 focus:border-indigo-500 focus:outline-none"
+            rows={1}
+          />
+          <button className="copilotKitInputControlButton ml-2 p-2 bg-indigo-600 rounded-lg text-white hover:bg-indigo-700">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBack: () => void }) {
   const [agentError, setAgentError] = useState<string | null>(null);
   const lastErrorRef = useRef<string | null>(null);
@@ -153,8 +223,14 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
     name: "expert_finder_agent",
   });
 
-  const { appendMessage, isLoading } = useCopilotChat();
+  const { appendMessage, reset, isLoading } = useCopilotChat();
   const messageSent = useRef(false);
+
+  // Handler for starting a new chat - uses CopilotKit's reset() to clear messages
+  const handleNewChat = () => {
+    reset(); // Clear all messages and reset chat state
+    onBack(); // Navigate back to landing page
+  };
 
   // Check for errors in agent state
   useEffect(() => {
@@ -341,7 +417,7 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
       {/* Navigation Header - subtle, fades into background */}
       <div className="px-6 py-4 shrink-0 bg-gradient-to-b from-gray-900/80 to-transparent">
         <button
-          onClick={onBack}
+          onClick={handleNewChat}
           className="group flex items-center gap-2 text-gray-500 hover:text-gray-200 transition-all duration-200"
         >
           <svg 
@@ -354,7 +430,7 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          <span className="text-sm font-medium">Back</span>
+          <span className="text-sm font-medium">New Chat</span>
         </button>
       </div>
 
@@ -388,7 +464,6 @@ function ChatContent({ initialMessage, onBack }: { initialMessage: string; onBac
           }}
           instructions="You are an expert finder assistant for OpenShift AI. Help users find the right people to talk to about features, teams, and technical topics."
           className="h-full"
-          showActivityIndicator={true}
         />
       </div>
     </div>
