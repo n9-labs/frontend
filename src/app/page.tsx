@@ -8,7 +8,7 @@ import {
 import { CopilotKitCSSProperties, CopilotChat } from "@copilotkit/react-ui";
 import "@copilotkit/react-ui/styles.css";
 import { Role, TextMessage } from "@copilotkit/runtime-client-gql";
-import { useState, FormEvent, useRef, useEffect } from "react";
+import { useState, FormEvent, useEffect, useRef } from "react";
 
 export default function CopilotKitPage() {
   const [showChat, setShowChat] = useState(false);
@@ -148,20 +148,36 @@ function ChatContent({ initialMessage }: { initialMessage: string }) {
     name: "expert_finder_agent",
   });
 
-  const messageSent = useRef(false);
+  const { appendMessage, isLoading } = useCopilotChat();
+  const hasSubmittedRef = useRef(false);
 
-  const { appendMessage } = useCopilotChat();
-  
-  // When agent is ready (running becomes true), submit the initial message
+  // Send the initial message when the chat is ready
+  // Using a ref instead of state to avoid re-renders and race conditions
   useEffect(() => {
-    if (initialMessage && !messageSent.current) {
-      messageSent.current = true;
-      appendMessage(new TextMessage({
-        role: Role.User,
-        content: initialMessage,
-      }));
+    if (!initialMessage || hasSubmittedRef.current) return;
+
+    // Retry until appendMessage succeeds - this handles the timing issue
+    // where the chat might not be fully initialized yet
+    const sendMessage = async () => {
+      try {
+        await appendMessage(
+          new TextMessage({
+            content: initialMessage,
+            role: Role.User,
+          })
+        );
+        hasSubmittedRef.current = true;
+      } catch (error) {
+        // If it fails, retry after a short delay
+        setTimeout(sendMessage, 200);
+      }
+    };
+
+    // Start trying to send once we have appendMessage and chat isn't loading
+    if (appendMessage && !isLoading) {
+      sendMessage();
     }
-  }, [appendMessage, initialMessage]);
+  }, [initialMessage, appendMessage, isLoading]);
 
 
   useDefaultTool({
