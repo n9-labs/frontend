@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
     api_key: str = Field(default="")
 
+    # For self-served modls
+    openai_base_url: str | None = Field(default=None, validation_alias="OPENAI_BASE_URL")
+
     # Vertex for Anthropic
     anthropic_use_vertex: str = Field(default="", validation_alias="ANTHROPIC_USE_VERTEX")
     anthropic_vertex_model: str = Field(default="claude-sonnet-4@20250514", validation_alias="ANTHROPIC_MODEL")
@@ -75,6 +78,10 @@ class Settings(BaseSettings):
 
         openai = (self.openai_api_key or "").strip()
         anthropic = (self.anthropic_api_key or "").strip()
+
+        if self.openai_base_url is not None and len(self.openai_base_url) > 0:
+            self.api_key = openai
+            return self
 
         provided = [k for k in (openai, anthropic) if k]
         if len(provided) == 0:
@@ -785,13 +792,14 @@ def get_model():
             project=settings.anthropic_vertex_project,
             location=settings.anthropic_vertex_region,
         )
-    elif settings.openai_api_key:
+    elif settings.openai_api_key or settings.openai_base_url:
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
             model=settings.model,
             api_key=settings.openai_api_key,
             streaming=True,
+            base_url=settings.openai_base_url,
         )
     elif settings.anthropic_api_key:
         from langchain_anthropic import ChatAnthropic
